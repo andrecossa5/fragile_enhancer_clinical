@@ -5,8 +5,6 @@ Exploratory data analysis. How much do we have??
 import os
 import numpy as np
 import pandas as pd
-from Cellula._utils import *
-from Cellula.plotting._plotting_base import *
 
 
 ##
