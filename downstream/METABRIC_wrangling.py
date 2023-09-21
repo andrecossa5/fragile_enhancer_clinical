@@ -11,8 +11,8 @@ import pandas as pd
 
 
 # Paths
-path_data = '/Users/IEO5505/Desktop/fragile-enchancer-clinical/data/METABRIC/raw'
-path_results = '/Users/IEO5505/Desktop/fragile-enchancer-clinical/data/METABRIC'
+path_data = '/Users/IEO5505/Desktop/fragile_enhancer_clinical/data/METABRIC/raw'
+path_results = '/Users/IEO5505/Desktop/fragile_enhancer_clinical/data/METABRIC'
 
 
 ##
@@ -50,7 +50,7 @@ df = patients_df.join([samples_df, M])
 
 # Filter and format colnames
 df.loc[df['OS_STATUS'] == '0:LIVING', 'OS_STATUS'] = False
-df.loc[df['OS_STATUS'] == '1:LIVING', 'OS_STATUS'] = True
+df.loc[df['OS_STATUS'] == '1:DECEASED', 'OS_STATUS'] = True
 df.loc[df['RFS_STATUS'] == '0:Not Recurred', 'RFS_STATUS'] = False
 df.loc[df['RFS_STATUS'] == '1:Recurred', 'RFS_STATUS'] = True
 df.insert(df.columns.get_loc('RFS_STATUS')+1, 'OS_time', df['OS_MONTHS']*31)
