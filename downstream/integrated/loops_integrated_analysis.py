@@ -15,7 +15,7 @@ matplotlib.use('macOSX')
 # Utils
 def filter_enhancers(enh, df):
     """
-    Test if as set of enhancers coincide with some loop interaction pair.
+    Test if as set of enhancers coincide with some HiChip loop (i.e., HiChip bin interaction pair).
     """
     L = []
     for i in range(enh.shape[0]):
@@ -58,11 +58,16 @@ res = 8
 # Viz per sample
 scr = pd.read_csv(os.path.join(path_results, 'loops', 'SCR', f'SCR_loops_{res}.txt.gz'), sep='\t')
 kd = pd.read_csv(os.path.join(path_results, 'loops', 'KD', f'KD_loops_{res}.txt.gz'), sep='\t')
+print(scr.shape[0])
+print(kd.shape[0])
 
-# Filter highly significative interactions at proper distance (i.e., D >= 3*res*resolution and below 1MB)
+# Filter highly significative interactions with enough supporting reads and at 
+# proper distance (i.e., D >= 3*res*resolution and below 1MB)
 thr = 3*1000*res
-scr = scr.query('qvalue<=0.01 and D>=@thr and D<=1000000')
-kd = kd.query('qvalue<=0.01 and D>=@thr and D<=1000000')
+scr = scr.query('qvalue<=0.01 and D>=@thr and D<=1000000 and counts>=5')
+kd = kd.query('qvalue<=0.01 and D>=@thr and D<=1000000 and counts>=5')
+print(scr.shape[0])
+print(kd.shape[0])
 
 # Intersections and rankings based on loop strenghts (estimated mu)
 
@@ -91,6 +96,14 @@ enh = enh.dropna()
 
 # Filter out CtIP enancers
 df_coords = filter_enhancers(enh, scr_specific)
+
+
+df_coords
+
+
+
+
+
 
 # Intersect and rank mutated enhancers
 df_muts = pd.read_csv(os.path.join(path_results, 'andrea.CtIP_mutated_enhancers.tsv'), sep='\t')

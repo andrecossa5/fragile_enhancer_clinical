@@ -12,8 +12,8 @@ library(HiCDCPlus)
 # Parse args
 args <- commandArgs(TRUE)
 path_pairs <- args[1] 
-outdir <- as.numeric(args[2])
-res <- args[3]
+outdir <- args[2]
+res <- as.numeric(args[3])
 sample_name <- args[4]
 
 # Generate genomic features
@@ -33,11 +33,11 @@ gi_list <- expand_1D_features(gi_list)
 
 # HiCDCPlus
 set.seed(1234)
-gi_list <- HiCDCPlus_parallel(gi_list, ncore=8)
+gi_list <- HiCDCPlus_parallel(gi_list, ncore=2)
 gi_list_write(
   gi_list, 
   fname=paste0(outdir, '/', sample_name, '_loops_', round(res/1000), '.txt.gz')
 )
 
 
-##
+#

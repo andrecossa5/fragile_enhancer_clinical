@@ -2,8 +2,8 @@
 
 ################################################################
 
-## Start tidyverse image: NBBB ricordarsi --platform linux/x86_64 in docker build
-FROM rocker/tidyverse:latest 
+## Start tidyverse image: NBBB ricordarsi --platform linux/x86_64 or linux/amd64 in docker build
+FROM rocker/tidyverse
 
 LABEL mantainer = "andrea.cossa@ieo.it"
 
@@ -16,15 +16,28 @@ RUN apt-get --quiet update --yes \
         libxml2-dev \
         build-essential \
         libz-dev \
-	libglpk-dev \
+	    libglpk-dev \
         wget \
         procps \
         git \
         cmake \
     && rm -rf /var/lib/apt/lists/*
 
+# Mamba
+RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Mambaforge-Linux-x86_64.sh \
+    && bash Mambaforge-Linux-x86_64.sh -b -p /mambaforge
+ENV PATH="/mambaforge/bin/:$PATH"
+
+# Python
+RUN mamba install -c conda-forge python=3.10
+RUN pip install plotting_utils 
+RUN pip install cooler cooltools coolpuppy hic-straw
+
 # BiocManager
 RUN Rscript -e "install.packages('BiocManager')"
+
+# Rhtslib
+RUN mamba install -c bioconda bedtools samtools
 
 # HiCDCPlus
 RUN Rscript -e "BiocManager::install('HiCDCPlus')"
@@ -33,4 +46,9 @@ RUN Rscript -e "BiocManager::install('HiCDCPlus')"
 CMD [ "bash" ]
 
 #################################################################
+
+
+
+
+
 
