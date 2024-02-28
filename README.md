@@ -1,2 +1,2 @@
-# Fragile_enhancers_clinical-
-Survival analysis on clinical data from PCAWG
+# Fragile_enhancers_clinical
+Reproducibility repo hosting all downstream analysis for the Ciacci et al. project.
