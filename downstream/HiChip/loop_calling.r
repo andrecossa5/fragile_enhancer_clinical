@@ -1,12 +1,14 @@
 # Loop calling
 
 # Code
+library(data.table)
 library(tidyverse)
 library(HiCDCPlus)
 
 # Paths
-# path_pairs <- '/Users/IEO5505/Desktop/fragile_enhancer_clinical/data/Hi_Chip/hic_pro/SCR_pool.txt'
-# outdir <- '/Users/IEO5505/Desktop/fragile_enhancer_clinical/data/Hi_Chip/hic_pro'
+# path_pairs <- '/Users/IEO5505/Desktop/fragile_enhancer_clinical/data/functional_genomics/HiChip/valid_pairs/prova.bedpe'
+# outdir <- '/Users/IEO5505/Desktop/fragile_enhancer_clinical/data/functional_genomics/HiChip/valid_pairs'
+# sample_name <- 'prova'
 # res <- as.numeric("50000")
 
 # Parse args
@@ -33,11 +35,20 @@ gi_list <- expand_1D_features(gi_list)
 
 # HiCDCPlus
 set.seed(1234)
-gi_list <- HiCDCPlus_parallel(gi_list, ncore=2)
-gi_list_write(
-  gi_list, 
-  fname=paste0(outdir, '/', sample_name, '_loops_', round(res/1000), '.txt.gz')
-)
+gi_list <- HiCDCPlus_parallel(gi_list, ncore=4)
 
+# Write separate files for each chromosome
+path_tmp <- paste0(outdir, '/', sample_name, '_loops_', round(res/1000))
+dir.create(path_tmp)
+for (chr in names(gi_list)) { 
+  fwrite(
+    gi_list$chr1 %>% as.data.frame() %>% filter(counts>0), 
+    sep='\t', paste0(path_tmp, '/', chr, '_counts.txt')) 
+}
+
+# gi_list_write(
+#  gi_list, 
+#  fname=paste0(outdir, '/', sample_name, '_loops_', round(res/1000), '.txt.gz')
+# )
 
 #

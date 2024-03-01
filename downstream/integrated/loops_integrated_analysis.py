@@ -1,10 +1,9 @@
 """
-Visualize and quantify overlap between loops at different resolution.
+Integrated analysis of HiCHip loops.
 """
 
 import os
-import numpy as np
-import pandas as pd
+from utils.integrated import *
 from plotting_utils._plotting_base import *
 matplotlib.use('macOSX')
 
@@ -12,109 +11,102 @@ matplotlib.use('macOSX')
 ##
 
 
-# Utils
-def filter_enhancers(enh, df):
-    """
-    Test if as set of enhancers coincide with some HiChip loop (i.e., HiChip bin interaction pair).
-    """
-    L = []
-    for i in range(enh.shape[0]):
-        d = enh.iloc[i].to_dict()
-        enh_chr = d['chrI']
-        enh_pos = d['startI']
-        cluster = d['cluster']
-        testI = (enh_pos >= df['startI']) & (enh_pos <= df['endI']) & (enh_chr == df['chrI'])
-        testJ = (enh_pos >= df['startJ']) & (enh_pos <= df['endJ']) & (enh_chr == df['chrJ'])
-        if testI.any():
-            isin = 0
-            idx = np.where(testI)[0]
-        elif testJ.any():
-            isin = 1
-            idx = np.where(testJ)[0]
-        start_i, end_i = df.iloc[idx,1:3].values[0]
-        start_j, end_j = df.iloc[idx,4:6].values[0]
-        l = [enh_chr, start_i, end_i, enh_chr, start_j, end_j, enh_pos, cluster, isin]
-        L.append(l)
-    
-    # DataFrame
-    df_coords = pd.DataFrame(L, columns=['chr', 'startI', 'endI', 'chr', 'startJ', 'endJ', 'enhancer_summit', 'cluster', 'isin_bin'])
-    
-    return df_coords
-        
-
-##
-
-
 # Paths
 path_main = '/Users/IEO5505/Desktop/fragile_enhancer_clinical'
-path_results = os.path.join(path_main, 'results', 'Hi_Chip')
-path_enhancers = '/Users/IEO5505/Desktop/fragile_enhancer_clinical/data/Hi_Chip/CtIP_enhancers.txt'
+path_func_genomics = os.path.join(path_main, 'data', 'functional_genomics')
+path_hichip = os.path.join(path_func_genomics, 'HiChip')
+path_results = os.path.join(path_main, 'results', 'integrated')
+path_enhancers = os.path.join(path_main, 'data', 'functional_genomics', 'others', 'CtIP_enhancers.txt')
+path_tss = os.path.join(path_func_genomics, 'others', 'TSSs_elisa', 'TSSs_from_hg19_ncbiRefSeq.tsv')
+path_expression = os.path.join(path_main, 'data', 'expression', 'KD_vs_SCR_DEGs.csv')
 res = 8
 
 
 ##
 
 
-# Viz per sample
-scr = pd.read_csv(os.path.join(path_results, 'loops', 'SCR', f'SCR_loops_{res}.txt.gz'), sep='\t')
-kd = pd.read_csv(os.path.join(path_results, 'loops', 'KD', f'KD_loops_{res}.txt.gz'), sep='\t')
-print(scr.shape[0])
-print(kd.shape[0])
-
-# Filter highly significative interactions with enough supporting reads and at 
-# proper distance (i.e., D >= 3*res*resolution and below 1MB)
-thr = 3*1000*res
-scr = scr.query('qvalue<=0.01 and D>=@thr and D<=1000000 and counts>=5')
-kd = kd.query('qvalue<=0.01 and D>=@thr and D<=1000000 and counts>=5')
+# Read filtered loops
+scr = pd.read_csv(os.path.join(path_hichip, 'filtered_loops', 'SCR_filtered', f'SCR_loops_{res}.txt.gz'), sep='\t')
+kd = pd.read_csv(os.path.join(path_hichip, 'filtered_loops', 'KD_filtered', f'KD_loops_{res}.txt.gz'), sep='\t')
 print(scr.shape[0])
 print(kd.shape[0])
 
 # Intersections and rankings based on loop strenghts (estimated mu)
 
 # KD
-kd_specific = kd.merge(scr, how='left', on=['chrI', 'startI', 'endI', 'chrJ', 'startJ', 'endJ'], suffixes=['_KD', '_SCR'])
+kd_specific = kd.merge(
+    scr, on=['chrI', 'startI', 'endI', 'chrJ', 'startJ', 'endJ'], 
+    how='left', suffixes=['_KD', '_SCR']
+)
 test = kd_specific.loc[:,kd_specific.columns.str.contains('SCR')].isna().sum(axis=1) != 0
 kd_specific = kd_specific.loc[test,:].iloc[:,:12].sort_values('mu_KD', ascending=False)
 
 # SCR
-scr_specific = scr.merge(kd, how='left', on=['chrI', 'startI', 'endI', 'chrJ', 'startJ', 'endJ'], suffixes=['_SCR', '_KD'])
+scr_specific = scr.merge(
+    kd, on=['chrI', 'startI', 'endI', 'chrJ', 'startJ', 'endJ'], 
+    how='left', suffixes=['_SCR', '_KD']
+)
 test = scr_specific.loc[:,scr_specific.columns.str.contains('KD')].isna().sum(axis=1) != 0
 scr_specific = scr_specific.loc[test,:].iloc[:,:12].sort_values('mu_SCR', ascending=False)
 
 # Common
-common = kd.merge(scr, how='inner', on=['chrI', 'startI', 'endI', 'chrJ', 'startJ', 'endJ'], suffixes=['_KD', '_SCR'])
+common = kd.merge(
+    scr, on=['chrI', 'startI', 'endI', 'chrJ', 'startJ', 'endJ'], 
+    how='inner', suffixes=['_KD', '_SCR']
+)
 kd_specific.shape[0] + common.shape[0] + scr_specific.shape[0]
 
 
 ## 
 
 
-# SCR specific and CtIP
+# SCR specific loops: CtIP enhancers and other interactors
 enh = pd.read_csv(path_enhancers, sep='\t', header=None)
 enh.columns = ['chrI', 'startI', 'endI', 'cluster']
 enh = enh.dropna()
 
-# Filter out CtIP enancers
-df_coords = filter_enhancers(enh, scr_specific)
+# SCR specific (KO depleted) loops which connects CtIP enhancers with other interactors (ctip_loops)
+ctip_loops = filter_enhancers(enh, scr_specific)
+ctip_loops.shape[0] / scr_specific.shape[0]
 
+# ctip_loops CtIP cluster prevalence
+ctip_loops['isin_bin'].value_counts()
+ctip_loops['cluster'].value_counts(normalize=True)
 
-df_coords
+# ctip_loops connecting ctip-enh with known gene tss 
+df_tss = pd.read_csv(path_tss, sep='\t')
+ctip_tss_loops = (
+    scr_specific.merge(
+        filter_tss(df_tss, ctip_loops)
+        .rename(columns={'chr':'chrI'}).assign(chrJ=lambda x: x['chrI']),
+        how='inner', on=['chrI', 'startI', 'endI', 'chrJ', 'startJ', 'endJ']
+        
+    )
+    .sort_values('mu_SCR', ascending=False)
+)
 
+# How many ctip-enh --> tss loops, per gene?
+ctip_tss_loops['gene'].value_counts().describe()
+ctip_tss_loops['gene'].value_counts().head(50)
+ctip_tss_loops['gene'].values
 
-
-
+# DEGs
+df_de = pd.read_csv(path_expression)
+ctip_tss_de_loops = ctip_tss_loops.loc[ctip_tss_loops['gene'].isin(df_de['GeneName'])]
+g1 = set(ctip_tss_loops['gene'].to_list())
+g2 = set(df_de['GeneName'].to_list())
+genes = list(g1 & g2)
+df_de.loc[df_de['GeneName'].isin(genes)][['GeneName','logFC', 'logCPM']].sort_values('logFC')
 
 
 # Intersect and rank mutated enhancers
-df_muts = pd.read_csv(os.path.join(path_results, 'andrea.CtIP_mutated_enhancers.tsv'), sep='\t')
-
-
-a = df_coords['chr'] + ':' + df_coords['enhancer_summit'].astype(np.int64).astype('str')
-b = df_muts['seqnames'] + ':' + df_muts['summit'].astype('str')
-
-
-a.isin(b)
-
-a
+# df_muts = pd.read_csv(os.path.join(path_results, 'andrea.CtIP_mutated_enhancers.tsv'), sep='\t')
+# 
+# 
+# a = df_coords['chr'] + ':' + df_coords['enhancer_summit'].astype(np.int64).astype('str')
+# b = df_muts['seqnames'] + ':' + df_muts['summit'].astype('str')
+# 
+# 
+# a.isin(b)
 
 
