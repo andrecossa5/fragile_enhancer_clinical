@@ -1,0 +1,242 @@
+---
+title: "SNVs_distribution"
+output: html_document
+date: "2024-02-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(GenomicRanges)
+library(reshape2)
+
+SEED <- 4321
+set.seed(SEED)
+
+```
+
+```{r}
+IN_FOLDER <- "/Users/ieo6983/Desktop/Ciacci_et_al/data/"
+OUT_FOLDER <- "/Users/ieo6983/Desktop/Ciacci_et_al/results/ICGC/mutations_distribution_over_enhancers/"
+
+```
+
+
+```{r}
+### INPUT FILES
+
+# SSMs 
+SSMs <- read_tsv(paste(IN_FOLDER, "./genomics/pre_processed_ICGC/simple_somatic_mutation.open.matching_calls.tsv", sep=""))
+SSMs <- SSMs[, -c(9,14)]
+colnames(SSMs)[c(7,8)] <- c("start", "end") 
+SSMs$chromosome <- paste("chr", SSMs$chromosome, sep = "")
+## Only single-base substitution
+SSMs_snvs <- SSMs[SSMs$mutation_type == "single base substitution", ] # 4'608'346 (over ~5M)
+SSMs_gr <- makeGRangesFromDataFrame(SSMs_snvs, keep.extra.columns = T)
+
+# ALL enhancers: CtIP, GRHL, MRE11
+enh <- read_tsv(paste(IN_FOLDER, "functional_genomics/others/Cluster_enhancers_all.txt", sep="")) # 10'344 entries
+colnames(enh)[1] <- "chrom" 
+enh$summit <- enh$start # add summit location
+
+# Putative enhancers: H3K27ac (no CtIP, GRHL, MRE11, self_overlaps)
+put_enhancers <- read_tsv(paste(IN_FOLDER, "functional_genomics/others/PutativeEnhnacers_MCF10A_hg19.filtered_GRHL_CtIP_MRE11_self.tsv", sep=""))
+colnames(put_enhancers)[1] <- "chrom" 
+put_enhancers$summit <- put_enhancers$start # add summit location
+
+
+
+### OTHER VARS
+markers <- c("CtIP", "GRHL") # markers of interest
+label <- "all_enhancers_and_k27ac_control"
+win <- 3000 
+
+```
+
+```{r}
+### DISTRIBUTION OF SNVs IN ENHANCER REGIONS
+for(m in markers){
+  print(m)
+  marker <- m
+  
+  
+  ### Pre/process input data
+  # CtIP/GRHL enhancers
+  marker_enh <- enh[startsWith(enh$deepTools_group, marker), ] # select enhancer with 'marker'
+  # Putative enhancers
+  put_enh <- put_enhancers[sample(seq(1,dim(put_enhancers)[1]), size = dim(marker_enh)[1], replace = F), ] # sample a set of regions 
+  print(paste("Number of putative enhancers sampled: ", dim(put_enh)[1]))
+  
+  
+  ### Extend regions of 'win' from summit
+  marker_enh$start <- marker_enh$summit - win
+  marker_enh$end <- marker_enh$summit + win
+  put_enh$start <- put_enh$summit - win
+  put_enh$end <- put_enh$summit + win
+  
+  enh_gr <- makeGRangesFromDataFrame(marker_enh, keep.extra.columns = T)
+  put_enh_gr <- makeGRangesFromDataFrame(put_enh, keep.extra.columns = T)
+
+  
+  ### Find SNVs / Enhancers overlaps 
+  # All CtIP & GRHL enhancers - overlap with matching SSMs 
+  hits_obj_enh <- findOverlaps(query=enh_gr, subject=SSMs_gr)
+  SSMs_sbj <- data.frame(SSMs_gr[subjectHits(hits_obj_enh)])
+  colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+  enh_SSMs <- cbind(data.frame(enh_gr[queryHits(hits_obj_enh)]), SSMs_sbj) 
+
+  hits_obj_put_enh <- findOverlaps(query = put_enh_gr, subject = SSMs_gr)
+  SSMs_sbj <- data.frame(SSMs_gr[subjectHits(hits_obj_put_enh)])
+  colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+  put_enh_SSMs <- cbind(data.frame(put_enh_gr[queryHits(hits_obj_put_enh)]), SSMs_sbj) 
+  
+  
+  ### Compute dist of SNVs from enhancer summit 
+  dist_enh <- enh_SSMs$start_sbj - enh_SSMs$summit
+  dist_put_enh <- put_enh_SSMs$start_sbj - put_enh_SSMs$summit
+  max_lenght <- max(length(dist_enh), length(dist_put_enh))
+  dist_all <- data.frame(dist_enh = c(dist_enh, rep(NA, max_lenght - length(dist_enh))), 
+                         dist_put_enh = c(dist_put_enh, rep(NA, max_lenght - length(dist_put_enh))))
+    
+  
+  ### Plot binned distributions
+  nbins <- c(1000, 100)
+  ifelse(marker == "CtIP", color <- "lightblue", color <- "pink")
+  
+  for(i in 1:2){
+    p <- dist_all %>% ggplot(.)+
+      geom_histogram(aes(x = dist_enh), fill = color, alpha = 0.7, bins = nbins[i])+
+      geom_text(data = data.frame(), aes(x=Inf, y=Inf, label= marker), color=color, vjust = 1.5, hjust = 2, 
+                size = 7, fontface = "bold")+
+      geom_histogram(aes(x = dist_put_enh, y = -..count..), fill = "gray", alpha = 0.7, bins = nbins[i])+
+      geom_text(data=data.frame(), aes(x=Inf, y=-Inf, label= "H3K27ac_CTRL"), color="gray", vjust = -1, hjust = 1.1, 
+                size = 7, fontface = "bold")+
+      theme_light()+
+      scale_x_continuous(breaks = seq(-3000, 3000, 500))+
+      labs(title = paste("Histogram of distances from peak summit - ", marker, " (Binsize = ", win*2/nbins, "bp)", sep =""), 
+         x = "distance from summit", y = "")
+    #print(p)
+    
+    ### Save Plot
+    #ggsave(paste(paste(OUT_FOLDER, paste("SNVs_distribution", marker, label, "binsize", win*2/nbins[i], "bp", sep="_"), sep=""), ".png", sep=""), plot = p, device = "png", width = 18, height = 7)
+    
+  }
+  
+}
+
+```
+
+
+
+
+
+
+### Distribution of STSMs breakpoint over enhancers regions ###
+
+```{r}
+### INPUT FILES
+# STSMs - No start-end, but chrom_bkpt
+SSMs <- read_tsv(paste(IN_FOLDER, "./genomics/pre_processed_ICGC/structural_somatic_mutation.cleaned.tsv", sep=""))
+STSMs <- STSMs[, -c(10, 12, 15, 17)]
+STSMs$chrom <- paste("chr", STSMs$chrom, sep = "")
+STSMs$start <- STSMs$chrom_bkpt
+STSMs$end <- STSMs$chrom_bkpt
+
+STSMs_gr <- makeGRangesFromDataFrame(STSMs, keep.extra.columns = T)
+
+
+# ALL enhancers: CtIP, GRHL, MRE11
+enh <- read_tsv(paste(IN_FOLDER, "functional_genomics/others/Cluster_enhancers_all.txt", sep="")) # 10'344 entries
+colnames(enh)[1] <- "chrom" 
+enh$summit <- enh$start # add summit location
+
+# Putative enhancers: H3K27ac (no CtIP, GRHL, MRE11, self_overlaps)
+put_enhancers <- read_tsv(paste(IN_FOLDER, "functional_genomics/others/PutativeEnhnacers_MCF10A_hg19.filtered_GRHL_CtIP_MRE11_self.tsv", sep=""))
+colnames(put_enhancers)[1] <- "chrom" 
+put_enhancers$summit <- put_enhancers$start # add summit location
+
+
+
+### OTHER VARS
+markers <- c("CtIP", "GRHL") # markers of interest
+label <- "all_enhancers_and_k27ac_control"
+
+win <- 3000 # Window around summit 
+
+```
+
+```{r}
+### DISTRIBUTION OF SNVs IN ENHANCER REGIONS
+for(m in markers){
+  print(m)
+  marker <- m
+  
+  
+  ### Pre/process input data
+  # CtIP/GRHL enhancers
+  marker_enh <- enh[startsWith(enh$deepTools_group, marker), ] # select enhancer with 'marker'
+  # Putative enhancers
+  put_enh <- put_enhancers[sample(seq(1,dim(put_enhancers)[1]), size = dim(marker_enh)[1], replace = F), ] # sample a set of regions 
+  print(paste("Number of putative enhancers sampled: ", dim(put_enh)[1]))
+  
+  
+  ### Extend regions of 'win' from summit
+  marker_enh$start <- marker_enh$summit - win
+  marker_enh$end <- marker_enh$summit + win
+  put_enh$start <- put_enh$summit - win
+  put_enh$end <- put_enh$summit + win
+  
+  enh_gr <- makeGRangesFromDataFrame(marker_enh, keep.extra.columns = T)
+  put_enh_gr <- makeGRangesFromDataFrame(put_enh, keep.extra.columns = T)
+
+  
+  ### Find SNVs / Enhancers overlaps 
+  # All CtIP & GRHL enhancers - overlap with matching SSMs 
+  hits_obj_enh <- findOverlaps(query=enh_gr, subject=STSMs_gr)
+  STSMs_sbj <- data.frame(STSMs_gr[subjectHits(hits_obj_enh)])
+  colnames(STSMs_sbj)[1:5] <- paste(colnames(STSMs_sbj)[1:5], "sbj", sep = "_")
+  enh_SSMs <- cbind(data.frame(enh_gr[queryHits(hits_obj_enh)]), STSMs_sbj) 
+
+  hits_obj_put_enh <- findOverlaps(query = put_enh_gr, subject = STSMs_gr)
+  STSMs_sbj <- data.frame(STSMs_gr[subjectHits(hits_obj_put_enh)])
+  colnames(STSMs_sbj)[1:5] <- paste(colnames(STSMs_sbj)[1:5], "sbj", sep = "_")
+  put_enh_SSMs <- cbind(data.frame(put_enh_gr[queryHits(hits_obj_put_enh)]), STSMs_sbj) 
+  
+  
+  ### Compute dist of SNVs from enhancer summit 
+  dist_enh <- enh_SSMs$start_sbj - enh_SSMs$summit
+  dist_put_enh <- put_enh_SSMs$start_sbj - put_enh_SSMs$summit
+  max_lenght <- max(length(dist_enh), length(dist_put_enh))
+  dist_all <- data.frame(dist_enh = c(dist_enh, rep(NA, max_lenght - length(dist_enh))), 
+                         dist_put_enh = c(dist_put_enh, rep(NA, max_lenght - length(dist_put_enh))))
+    
+  
+  ### Plot binned distributions
+  nbins <- c(1000, 100)
+  ifelse(marker == "CtIP", color <- "lightblue", color <- "pink")
+  
+  for(i in 1:2){
+    p <- dist_all %>% ggplot(.)+
+      geom_histogram(aes(x = dist_enh), fill = color, alpha = 0.7, bins = nbins[i])+
+      geom_text(data = data.frame(), aes(x=Inf, y=Inf, label= marker), color=color, vjust = 1.5, hjust = 2, 
+                size = 7, fontface = "bold")+
+      geom_histogram(aes(x = dist_put_enh, y = -..count..), fill = "gray", alpha = 0.7, bins = nbins[i])+
+      geom_text(data=data.frame(), aes(x=Inf, y=-Inf, label= "H3K27ac_CTRL"), color="gray", vjust = -1, hjust = 1.1, 
+                size = 7, fontface = "bold")+
+      theme_light()+
+      scale_x_continuous(breaks = seq(-3000, 3000, 500))+
+      labs(title = paste("Histogram of distances from peak summit - ", marker, " (Binsize = ", win*2/nbins, "bp)", sep =""), 
+         x = "distance from summit", y = "")
+    print(p)
+    
+    ### Save Plot
+    #ggsave(paste(paste(OUT_FOLDER, paste("STSMs_distribution", marker, label, "binsize", win*2/nbins[i], "bp", sep="_"), sep=""), ".png", sep=""), plot = p, device = "png", width = 18, height = 7)
+    
+  }
+  
+}
+
+```
+
+
