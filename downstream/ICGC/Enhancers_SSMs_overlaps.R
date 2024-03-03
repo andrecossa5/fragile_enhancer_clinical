@@ -13,7 +13,7 @@ source("./utils/functions_genomics.R")
 
 ### Input files ###
 SSMs <- read_tsv("./data/genomics/pre_processed_ICGC/simple_somatic_mutation.open.matching_calls.tsv")
-ENH <- read_tsv("./data/functional_genomics/others/CtIP_enhancers.txt") 
+ENH <- read_tsv("./data/functional_genomics/others/Cluster_enhancers_all.txt") 
 PUT_ENH <- read_tsv("./data/functional_genomics/others/PutativeEnhnacers_MCF10A_hg19.filtered_GRHL_CtIP_MRE11_self.tsv") 
 
 
