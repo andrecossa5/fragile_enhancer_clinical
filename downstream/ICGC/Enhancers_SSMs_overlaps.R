@@ -6,28 +6,29 @@ library(reshape2)
 SEED <- 4321
 set.seed(SEED)
 
-setwd("/Users/ieo6983/Desktop/enhancers_project/")
-source("./utils.R")
 
-
+setwd("/Users/ieo6983/Desktop/fragile_enhancer_clinical/")
+source("./utils/functions_genomics.R")
 
 
 ### Input files ###
+SSMs <- read_tsv("./data/genomics/pre_processed_ICGC/simple_somatic_mutation.open.matching_calls.tsv")
+ENH <- read_tsv("./data/functional_genomics/others/CtIP_enhancers.txt") 
+PUT_ENH <- read_tsv("./data/functional_genomics/others/PutativeEnhnacers_MCF10A_hg19.filtered_GRHL_CtIP_MRE11_self.tsv") 
+
+
+
 # SSMs 
-SSMs <- read_tsv("./icgc_data/simple_somatic_mutation.open.matching_calls.tsv")
 SSMs <- SSMs[, -c(9,14)]
 colnames(SSMs)[c(7,8)] <- c("start", "end") 
 SSMs$chromosome <- paste("chr", SSMs$chromosome, sep = "")
 SSMs_gr <- makeGRangesFromDataFrame(SSMs, keep.extra.columns = T)
 
 # ALL ENHANCERS: CtIP, GRHL, MRE11
-ENH <- read_tsv("./Cluster_enhancer.txt") 
 colnames(ENH)[1] <- "chrom" 
 ENH$summit <- ENH$start # add summit location
 
-
 # Putative enhancers: H3K27ac (no CtIP, GRHL, MRE11, self_overlaps)
-PUT_ENH <- read_tsv("./PutativeEnhnacers_MCF10A_hg19.filtered_GRHL_CtIP_MRE11_self.tsv") 
 colnames(PUT_ENH)[1] <- "chrom" 
 PUT_ENH$summit <- PUT_ENH$start # add summit location
 
@@ -35,8 +36,8 @@ PUT_ENH$summit <- PUT_ENH$start # add summit location
 
 
 ### 
-OUT_FOLDER_DATA <- "~/Desktop/Ciacci_et_al/results/ICGC/enhancers_SSMs_overlaps/data/"
-OUT_FOLDER_PLOTS <- "~/Desktop/Ciacci_et_al/results/ICGC/enhancers_SSMs_overlaps/plots/"
+OUT_FOLDER_DATA <- "~/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/"
+OUT_FOLDER_PLOTS <- "~/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/plots/"
 WIN <- 500
 MARKERS <- c("CtIP", "GRHL") 
 
@@ -198,6 +199,44 @@ for(m in MARKERS){
 
 
 
+
+
+### Extracting SNVs coordinates for RegulomeDB ###
+
+# RegulomeDB has 0-based coordinates
+# ICGC has 1-based coordinates - https://docs.icgc.org/submission/guide/icgc-simple-somatic-mutation-format/
+
+enh_SSMs_ctip <- read_tsv(paste(OUT_FOLDER_DATA, "Table_enh_SSMs_CtIP.all_overlaps.tsv",sep=""))
+enh_SSMs_grhl <- read_tsv(paste(OUT_FOLDER_DATA, "Table_enh_SSMs_GRHL.all_overlaps.tsv",sep=""))
+
+
+snvs_coords_ctip <- enh_SSMs_ctip %>% dplyr::select(seqnames_sbj, start_sbj, end_sbj) %>%
+  filter(!duplicated(.)) %>%
+  mutate(length = abs(end_sbj - start_sbj)) 
+# Retain only SNVs (length = 0)
+snvs_coords_ctip <- snvs_coords_ctip[snvs_coords_ctip$length == 0, ] 
+# convert to 0-based system
+snvs_coords_ctip$start_sbj <- snvs_coords_ctip$start_sbj - 1
+snvs_coords_ctip$length <- NULL
+
+
+snvs_coords_grhl <- enh_SSMs_grhl %>% dplyr::select(seqnames_sbj, start_sbj, end_sbj) %>%
+  filter(!duplicated(.)) %>%
+  mutate(length = abs(end_sbj - start_sbj)) 
+
+# Retain only SNVs (length = 0)
+snvs_coords_grhl <- snvs_coords_grhl[snvs_coords_grhl$length == 0, ] 
+
+# convert to 0-based system
+snvs_coords_grhl$start_sbj <- snvs_coords_grhl$start_sbj - 1
+snvs_coords_grhl$length <- NULL
+
+
+# Save coords in chr:start-end for RegulomeDB
+str_c(str_c(snvs_coords_ctip$seqnames_sbj, snvs_coords_ctip$start_sbj, sep = ":"), snvs_coords_ctip$end_sbj, sep = "-") %>% 
+  data.frame(.) #%>% write_tsv(., paste(OUT_FOLDER_DATA, "SNVs_coords_0_based.overlapping_with_enh_CtIP.for_regulomeDB.tsv", sep = ""), col_names = F)
+str_c(str_c(snvs_coords_grhl$seqnames_sbj, snvs_coords_grhl$start_sbj, sep = ":"), snvs_coords_grhl$end_sbj, sep = "-") %>% 
+  data.frame(.) #%>% write_tsv(., paste(OUT_FOLDER_DATA, "SNVs_coords_0_based.overlapping_with_enh_GRHL.for_regulomeDB.tsv", sep = ""), col_names = F)
 
 
 
