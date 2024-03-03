@@ -1,0 +1,177 @@
+---
+title: "Number_of_mutations"
+output: html_document
+date: "2024-02-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(GenomicRanges)
+
+SEED <- 4321
+set.seed(SEED)
+```
+
+
+```{r}
+# Functions 
+
+compute_stat_enhancers2 <- function(input_overlaps, source_enhancers_df){
+  df_all_stats <- data.frame(matrix(ncol = length(input_overlaps)+1, # +1 to store enh names 
+                                    nrow = dim(source_enhancers_df[[1]])[1]))
+  colnames(df_all_stats) <- c("name", "n_donors_hit")
+  
+  for(i in 1:length(input_overlaps)){
+    df_overlaps <- input_overlaps[[i]]
+    df_source <- source_enhancers_df[[i]]
+    
+    # Compute number of donors in which each enhancer is mutated
+    stat_enh <- df_overlaps %>% dplyr::group_by(name) %>%
+      dplyr::summarise(., n_donors_hit = length(unique(icgc_donor_id)))
+    
+    # Add to df enhancers with no mutation in any patient
+    stat_enh <- rbind(stat_enh, 
+                      data.frame("name" = df_source$name[!df_source$name %in% stat_enh$name], 
+                                 "n_donors_hit" = rep(0, length(df_source$name[!df_source$name %in% stat_enh$name]))))
+    
+    # add to df_all_stats
+    df_all_stats[, i] <- stat_enh$name
+    df_all_stats[, i+1] <- stat_enh$n_donors_hit
+  }
+  
+  return(df_all_stats)
+}
+
+
+```
+
+
+
+
+### INPUT DATA ###
+```{r}
+setwd("/Users/ieo6983/Desktop/fragile_enhancer_clinical/")
+
+SSMs <- read_tsv("./data/genomics/pre_processed_ICGC/simple_somatic_mutation.open.matching_calls.tsv")
+ENH <- read_tsv("./data/functional_genomics/others/Cluster_enhancers_all.txt") 
+PUT_ENH <- read_tsv("./data/functional_genomics/others/PutativeEnhnacers_MCF10A_hg19.filtered_GRHL_CtIP_MRE11_self.tsv") 
+
+
+
+# SSMs 
+SSMs <- SSMs[, -c(9,14)]
+colnames(SSMs)[c(7,8)] <- c("start", "end") 
+SSMs$chromosome <- paste("chr", SSMs$chromosome, sep = "")
+SSMs_gr <- makeGRangesFromDataFrame(SSMs, keep.extra.columns = T)
+
+# ALL ENHANCERS: CtIP, GRHL, MRE11
+colnames(ENH)[1] <- "chrom" 
+ENH$summit <- ENH$start # add summit location
+
+# Putative enhancers: H3K27ac (no CtIP, GRHL, MRE11, self_overlaps)
+colnames(PUT_ENH)[1] <- "chrom" 
+PUT_ENH$summit <- PUT_ENH$start # add summit location
+
+
+```
+
+
+
+### 
+```{r}
+OUT_FOLDER_DATA <- "~/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/"
+OUT_FOLDER_PLOTS <- "~/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/plots/"
+
+WIN <- 500
+MARKERS <- c("CtIP", "GRHL") 
+
+```
+
+
+
+# Number of mutations within each enhancer
+```{r}
+input_variants <- SSMs
+input_variants_gr <- SSMs_gr
+
+
+
+for(m in MARKERS){
+  print(m)
+  marker <- m
+  mut <- "SSMs"
+  
+  ### Pre/process input data ###
+  # CtIP/GRHL enhancers
+  marker_enh <- ENH[startsWith(ENH$deepTools_group, marker), ] # select enhancer with 'marker'
+  
+  ## Extend regions of 'win' from summit
+  marker_enh$start <- marker_enh$summit - WIN
+  marker_enh$end <- marker_enh$summit + WIN
+  
+  # Create GRanges objects 
+  enh_gr <- makeGRangesFromDataFrame(marker_enh, keep.extra.columns = T)
+  
+  ### Find mutations / enhancers overlaps ###
+  # CtIP/GRHL enhancers - overlap with matching SSMs 
+  hits_obj_enh <- findOverlaps(query=enh_gr, subject=SSMs_gr)
+  SSMs_sbj <- data.frame(SSMs_gr[subjectHits(hits_obj_enh)])
+  colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+  enh_SSMs <- cbind(data.frame(enh_gr[queryHits(hits_obj_enh)]), SSMs_sbj)
+  
+  
+  ### Compute stats
+  # Number of donors that each enhancer hit
+  classes = "n_donors_hit"
+  stat_enh <- compute_stat_enhancers2(list(enh_SSMs), 
+                             list(marker_enh))
+  
+  # Number of mutations within each enahncer
+  enh_SSMs$mut_coord_id <- str_c(enh_SSMs$seqnames_sbj, enh_SSMs$start_sbj, enh_SSMs$end_sbj, sep = "_")
+  
+  n_muts_enh <- enh_SSMs %>% group_by(name) %>% 
+  dplyr::summarise(n_muts = length(unique(mut_coord_id))) %>%
+  ungroup() %>%
+  dplyr::select(name, n_muts) 
+  n_muts_enh <- arrange(n_muts_enh, desc(n_muts_enh$n_muts))
+  
+  p <- n_muts_enh %>%
+  ggplot(., aes(x = n_muts))+
+  geom_histogram()+
+    theme_light()+
+    labs(title = paste("Number of mutations within each ", marker, " enhancer", sep =""), 
+         x = "Number of mutations", y = "")
+  print(p)
+ 
+  
+  # Dotplot
+  for_dot <- left_join(stat_enh, n_muts_enh, by = "name")
+  for_dot$n_muts[is.na(for_dot$n_muts)] <- 0
+  
+    scatter <- for_dot %>% 
+      ggplot(., aes(x = n_donors_hit, y = n_muts))+
+        geom_count(aes(size = ..n..), color = "blue3")+
+        scale_size_continuous(range = c(2, 10))+
+        #geom_jitter(width=1, height=1)+
+        theme_light()+
+        labs(title = paste(marker, " enhancers - Win = ", WIN, " bp", sep = ""),
+          y = "Number of mutations within enhancer", 
+          x = "Number of donors")+
+        theme(axis.text = element_text(size = 12),
+              axis.title = element_text(size = 16),
+              title = element_text(size = 16))+
+        scale_y_continuous(n.breaks = 7)+
+        scale_x_continuous(n.breaks = 8)
+    print(scatter)
+  
+  # Saving number of mutations x enhancer for the future
+  #write_tsv(n_muts_enh, paste(OUT_FOLDER_DATA, paste("Number_of_mutations_x_enhancer", marker, mut, sep="_"), sep =""))
+  
+  #ggsave(paste(paste(OUT_FOLDER_PLOTS, paste("Number_mutations_vs_number_donors", marker, mut, sep ="_"), sep = ""), ".png", sep = ""), plot = scatter, device = "png", width = 10, height = 7)
+
+}
+
+```
+
+
