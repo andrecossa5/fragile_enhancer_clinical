@@ -1,0 +1,226 @@
+---
+title: "RegulomeDB"
+output: html_document
+date: "2024-02-27"
+---
+
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(haploR) # About haplorR: https://github.com/cran/haploR
+
+SEED <- 4321
+set.seed(SEED)
+```
+
+
+About Regulome ranking scores: https://www.regulomedb.org/regulome-help/
+- The ranking refers to the amount of information related to that variant (eQTL, ChIP, etc) 
+- The probabilistic score is calculated from a random forest model, TURF, trained with allele-specific TF binding SNVs.
+
+```{r}
+IN_FOLDER <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/"
+OUT_FOLDER <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/functional_ranking_snvs/"
+```
+
+
+### All SNVs overlapping CtIP/GRHL
+
+```{r}
+
+ctip_snvs <- read_tsv(paste(IN_FOLDER, "SNVs_coords_0_based.overlapping_with_enh_CtIP.for_regulomeDB.tsv", sep=""), col_names = F)
+grhl_snvs <- read_tsv(paste(IN_FOLDER, "SNVs_coords_0_based.overlapping_with_enh_GRHL.for_regulomeDB.tsv", sep=""), col_names = F)
+
+dim(ctip_snvs); dim(grhl_snvs)
+
+```
+
+
+```{r}
+# CtIP RegulomeDB scores 
+
+# Apparently, it works only on 100 SNVs at a time.
+ints <- seq(1, dim(ctip_snvs)[1], by = 99)
+if(tail(ints, 1) < dim(ctip_snvs)[1]){ints <- c(ints, dim(ctip_snvs)[1])}
+
+
+ctip_regDB_scores <- data.frame()
+for(i in 1:length(ints)){
+  
+  if(ints[i] != dim(ctip_snvs)[1]){
+    #print(paste(ints[i], ints[i+1]))
+    DB_scores <- regulomeSummary(ctip_snvs$X1[ints[i]:ints[i+1]], 
+                                 genomeAssembly = "GRCh37",
+                                 limit=1000,
+                                 timeout=100)
+    
+    # Keep only ranking, scores, and evidence info 
+    DB_scores_out <- DB_scores[, c(1:13)]  
+    
+    # Add placeholder for breast-specific score
+    DB_scores_out$tissue_specific_score.breast <- 0
+      
+    # If tissue specific (breast) information is present, keep it
+    if(sum(endsWith(colnames(DB_scores), "breast") == 1)){
+      DB_scores_out$tissue_specific_score.breast <- DB_scores$regulome_score.tissue_specific_scores.breast
+    }
+    
+    #print(DB_scores)
+    ctip_regDB_scores <- rbind(ctip_regDB_scores, DB_scores_out)
+  }
+  
+}
+
+ctip_regDB_scores <- ctip_regDB_scores[!duplicated(ctip_regDB_scores), ]
+
+# Add original variant names
+ctip_snvs$end <- str_split(ctip_snvs$X1, pattern = "-", simplify = T)[,2]
+ctip_regDB_scores <- left_join(ctip_snvs, ctip_regDB_scores, by = "end")
+colnames(ctip_regDB_scores)[1] <- "snv_id"
+
+
+#write_tsv(ctip_regDB_scores, paste(OUT_FOLDER, "SNVs_overlapping_with_enh_CtIP.regulomeDB_scores.brest_scores.tsv", sep=""))
+
+```
+
+```{r}
+# 4'265 SNVs are common among CtIP and GRHL enhancers
+sum(ctip_snvs$X1 %in% grhl_snvs$X1)
+
+```
+
+
+```{r}
+# GRHL RegulomeDB scores 
+input_snvs <- grhl_snvs
+
+# Apparently, it works only on 100 SNVs at a time.
+ints <- seq(1, dim(input_snvs)[1], by = 99)
+if(tail(ints, 1) < dim(input_snvs)[1]){ints <- c(ints, dim(input_snvs)[1])}
+
+
+grhl_regDB_scores <- data.frame()
+for(i in 1:length(ints)){
+  
+  if(ints[i] != dim(input_snvs)[1]){
+    #print(paste(ints[i], ints[i+1]))
+    DB_scores <- regulomeSummary(input_snvs$X1[ints[i]:ints[i+1]], 
+                                 genomeAssembly = "GRCh37",
+                                 limit=1000,
+                                 timeout=100)
+    
+    # Keep only ranking, scores, and evidence info 
+    DB_scores_out <- DB_scores[, c(1:13)]  
+    
+    # Add placeholder for breast-specific score
+    DB_scores_out$tissue_specific_score.breast <- 0
+      
+    # If tissue specific (breast) information is present, keep it
+    if(sum(endsWith(colnames(DB_scores), "breast") == 1)){
+      DB_scores_out$tissue_specific_score.breast <- DB_scores$regulome_score.tissue_specific_scores.breast
+    }
+    
+    #print(DB_scores)
+    grhl_regDB_scores <- rbind(grhl_regDB_scores, DB_scores_out)
+  }
+  
+}
+
+grhl_regDB_scores <- grhl_regDB_scores[!duplicated(grhl_regDB_scores), ]
+
+# Add original variant names
+input_snvs$end <- str_split(input_snvs$X1, pattern = "-", simplify = T)[,2]
+grhl_regDB_scores <- left_join(input_snvs, grhl_regDB_scores, by = "end")
+colnames(grhl_regDB_scores)[1] <- "snv_id"
+
+
+#write_tsv(grhl_regDB_scores, paste(OUT_FOLDER, "SNVs_overlapping_with_enh_GRHL.regulomeDB_scores.brest_scores.tsv", sep=""))
+
+```
+
+
+
+## Plots of rankings ##
+```{r}
+ctip_regDB_scores <- read_tsv("./Analyses_enhancers_new/results/data/SNVs_overlapping_with_enh_CtIP.regulomeDB_scores.brest_scores.tsv")
+grhl_regDB_scores <- read_tsv("./Analyses_enhancers_new/results/data/SNVs_overlapping_with_enh_GRHL.regulomeDB_scores.brest_scores.tsv")
+
+
+# Probability scores
+ctip_regDB_scores %>%
+  ggplot(., aes(x = as.numeric(regulome_score.probability)))+
+  geom_histogram()+
+  theme_light()+
+  labs(title = "Distribution of RegulomeDB probablity scores - CtIP SNVs", 
+       x = "RegDB Probability score", y = "")+
+  theme(axis.text = element_text(size = 12))
+
+grhl_regDB_scores %>%
+  ggplot(., aes(x = as.numeric(regulome_score.probability)))+
+  geom_histogram()+
+  theme_light()+
+  labs(title = "Distribution of RegulomeDB probablity scores - GRHL SNVs", 
+       x = "RegDB Probability score", y = "")+
+  theme(axis.text = element_text(size = 12))
+
+sum(ctip_regDB_scores$regulome_score.probability > 0.5)
+sum(grhl_regDB_scores$regulome_score.probability > 0.5)
+
+
+# Ranking classes 
+ctip_regDB_scores %>%
+  ggplot(., aes(x = as.factor(ctip_regDB_scores$regulome_score.ranking),
+                fill = as.factor(ctip_regDB_scores$regulome_score.ranking)))+
+  geom_bar()+
+  theme_light()+
+  labs(title = "RegDB Ranking classes", 
+       x = "", y = "")+
+  theme(axis.text = element_text(size = 12))+
+  theme(legend.position = "none")
+
+grhl_regDB_scores %>%
+  ggplot(., aes(x = as.factor(regulome_score.ranking),
+                fill = as.factor(regulome_score.ranking)))+
+  geom_bar()+
+  theme_light()+
+  labs(title = "RegDB Ranking classes", 
+       x = "", y = "")+
+  theme(axis.text = element_text(size = 12))+
+  theme(legend.position = "none")
+
+
+# Tissue-specific scores - breast
+ctip_regDB_scores %>%
+  ggplot(., aes(x = as.numeric(tissue_specific_score.breast)))+
+  geom_histogram()+
+  theme_light()+
+  labs(title = "Distribution of breast-specific scores - CtIP SNVs", 
+       x = "tissue-specific score", y = "")+
+  theme(axis.text = element_text(size = 12))
+
+grhl_regDB_scores %>%
+  ggplot(., aes(x = as.numeric(tissue_specific_score.breast)))+
+  geom_histogram()+
+  theme_light()+
+  labs(title = "Distribution of breast-specific scores - GRHL SNVs", 
+       x = "tissue-specific score", y = "")+
+  theme(axis.text = element_text(size = 12))
+
+```
+
+
+## Rankings
+# Ranking = 2
+Likely to affect binding:
+2a) TF binding + matched TF motif + matched DNase footprint + DNase peak 
+2b) TF binding + any motif + DNase footprint + DNase peak 
+2c) TF binding + matched TF motif + DNase peak
+
+# Ranking = 3
+Less likely to affect binding 
+3a) TF binding + any motif + DNase peak 
+3b) TF binding + matched TF motif
+
+
+
+
