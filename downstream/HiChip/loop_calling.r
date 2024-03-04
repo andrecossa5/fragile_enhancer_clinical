@@ -33,22 +33,21 @@ gi_list <- generate_bintolen_gi_list(
 gi_list <- add_hicpro_allvalidpairs_counts(gi_list, path_pairs)
 gi_list <- expand_1D_features(gi_list)
 
-# HiCDCPlus
-set.seed(1234)
-gi_list <- HiCDCPlus_parallel(gi_list, ncore=4)
+# Process and write separate files for each chromosome
 
-# Write separate files for each chromosome
-path_tmp <- paste0(outdir, '/', sample_name, '_loops_', round(res/1000))
+# Prep folder
+path_tmp <- paste0(outdir, '/', sample_name, '_loops_', round(res/1000), '_kb')
 dir.create(path_tmp)
-for (chr in names(gi_list)) { 
+
+# Process and write
+for (chr in names(gi_list)) {
+  set.seed(1234)
+  g <- HiCDCPlus_chr(gi_list[[chr]], Dmin=2*res, Dmax=1000000)
   fwrite(
-    gi_list$chr1 %>% as.data.frame() %>% filter(counts>0), 
-    sep='\t', paste0(path_tmp, '/', chr, '_counts.txt')) 
+    g %>% as.data.frame() %>% filter(counts>=5), 
+    sep='\t', paste0(path_tmp, '/', chr, '_counts.txt')
+  ) 
 }
 
-# gi_list_write(
-#  gi_list, 
-#  fname=paste0(outdir, '/', sample_name, '_loops_', round(res/1000), '.txt.gz')
-# )
 
-#
+##
