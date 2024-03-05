@@ -6,58 +6,68 @@ import numpy as np
 import pandas as pd
 
 
+##
+
+
 # Utils
-def filter_enhancers(enh, df):
+def filter_loops_with_enhancers(df, df_enhancers):
     """
     Test if as set of enhancers coincide with some HiChip loop (i.e., HiChip bin interaction pair).
     """
     L = []
-    for i in range(enh.shape[0]):
-        d = enh.iloc[i].to_dict()
-        enh_chr = d['chrI']
-        enh_pos = d['startI']
+    for i in range(df_enhancers.shape[0]):
+        d = df_enhancers.iloc[i].to_dict()
+        enh_chr = d['chr']
+        enh_pos = d['start']
         cluster = d['cluster']
-        testI = (enh_pos >= df['startI']) & (enh_pos <= df['endI']) & (enh_chr == df['chrI'])
-        testJ = (enh_pos >= df['startJ']) & (enh_pos <= df['endJ']) & (enh_chr == df['chrJ'])
-        if testI.any():
+        test1 = (enh_pos >= df['start1']) & (enh_pos <= df['end1']) & (enh_chr == df['seqnames1'])
+        test2 = (enh_pos >= df['start2']) & (enh_pos <= df['end2']) & (enh_chr == df['seqnames2'])
+        if test1.any():
             isin = 0
-            idx = np.where(testI)[0]
-        elif testJ.any():
+            idx = np.where(test1)[0]
+        elif test2.any()
             isin = 1
-            idx = np.where(testJ)[0]
-        start_i, end_i = df.iloc[idx,1:3].values[0]
-        start_j, end_j = df.iloc[idx,4:6].values[0]
-        l = [enh_chr, start_i, end_i, enh_chr, start_j, end_j, enh_pos, cluster, isin]
+            idx = np.where(test2)[0]
+        start1, end1 = df.iloc[idx,1:3].values[0]
+        start2, end2 = df.iloc[idx,4:6].values[0]
+        l = [enh_chr, start1, end1, enh_chr, start2, end2, enh_pos, cluster, isin]
         L.append(l)
     
     # DataFrame
-    df_coords = pd.DataFrame(L, columns=['chr', 'startI', 'endI', 'chr', 'startJ', 'endJ', 'enhancer_summit', 'cluster', 'isin_bin'])
+    df_filtered = pd.DataFrame(
+        L,
+        columns=[
+            'seqnames1', 'start1', 'end1', 
+            'seqnames2', 'start2', 'end2', 
+            'enhancer_summit', 'cluster', 'isin_bin'
+        ]
+    )
     
-    return df_coords
+    return df_filtered
         
 
 ##
 
 
-def filter_tss(df_tss, df):
+def filter_loops_with_tss(df, df_tss):
     """
-    Filter bedpe file with tss table
+    Filter bedpe file with tss table.
     """
     L = []
     for i in range(df.shape[0]):
         d = df.iloc[i].to_dict()
         chrom = d['chr']
         isin_bin = d['isin_bin']
-        start_i = d['startI']
-        end_i = d['endI']
-        start_j = d['startJ']
-        end_j = d['endJ']
+        start1 = d['start1']
+        end1 = d['end1']
+        start2 = d['start2']
+        end2 = d['end2']
         if isin_bin == 0:
-            start = start_i
-            end = end_i
+            start = start1
+            end = end1
         elif isin_bin == 1:
-            start = start_j
-            end = end_j
+            start = start2
+            end = end2
         test = (df_tss['chr'] == chrom) & (df_tss['tss'] >= start) & (df_tss['tss'] <= end)
         if test.any():
             gene_record = df_tss.loc[test]
@@ -67,14 +77,15 @@ def filter_tss(df_tss, df):
             L.append(list(d.values()))
 
     # DataFrame
-    df_coords = pd.DataFrame(
-        L, columns=[
-            'chr', 'startI', 'endI', 'startJ', 'endJ', 'enhancer_summit', 
+    df_filtered = pd.DataFrame(
+        L, 
+        columns=[
+            'chr1', 'start1', 'end1', 'start2', 'end2', 'enhancer_summit', 
             'enhancer_cluster', 'enh_bin', 'tss', 'gene', 'tss_bin'
         ]
     )
 
-    return df_coords
+    return df_filtered
 
 
 ##

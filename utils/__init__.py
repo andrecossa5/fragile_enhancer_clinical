@@ -1,1 +1,1 @@
-from survival import *
+from . import *
