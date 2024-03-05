@@ -12,11 +12,10 @@ import pandas as pd
 
 # Args
 path_input = sys.argv[1]
-res = int(sys.argv[2])
 
 # Paths
 # path_input = '/Users/IEO5505/Desktop/fragile_enhancer_clinical/data/functional_genomics/HiChip/filtered_loops/prova'
-# res = i8
+# res = 8
 
 # Paths
 filename = os.path.basename(path_input)
