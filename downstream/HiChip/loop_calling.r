@@ -44,7 +44,7 @@ for (chr in names(gi_list)) {
   set.seed(1234)
   g <- HiCDCPlus_chr(gi_list[[chr]], Dmin=2*res, Dmax=1000000)
   fwrite(
-    g %>% as.data.frame() %>% filter(counts>=5), 
+    g %>% as.data.frame() %>% drop_na() %>% filter(counts>=5), 
     sep='\t', paste0(path_tmp, '/', chr, '_counts.txt')
   ) 
 }
