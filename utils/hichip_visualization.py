@@ -33,7 +33,7 @@ def ticks_formatter(ax, x=True, y=True, chrom='#', res=1000, rotate=True):
     if rotate:
         ax.tick_params(axis='x',rotation=45)
 
-    ax.set_xlabel(f'chr{chrom} ({res} kb binsize)')
+    ax.set_xlabel(f'chr{chrom} ({int(res/1000)} kb)')
 
 
 ##

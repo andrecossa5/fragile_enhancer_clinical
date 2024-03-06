@@ -23,10 +23,10 @@ def filter_loops_with_enhancers(df, df_enhancers):
         test1 = (enh_pos >= df['start1']) & (enh_pos <= df['end1']) & (enh_chr == df['seqnames1'])
         test2 = (enh_pos >= df['start2']) & (enh_pos <= df['end2']) & (enh_chr == df['seqnames2'])
         if test1.any():
-            isin = 0
-            idx = np.where(test1)[0]
-        elif test2.any()
             isin = 1
+            idx = np.where(test1)[0]
+        elif test2.any():
+            isin = 2
             idx = np.where(test2)[0]
         start1, end1 = df.iloc[idx,1:3].values[0]
         start2, end2 = df.iloc[idx,4:6].values[0]
@@ -56,7 +56,7 @@ def filter_loops_with_tss(df, df_tss):
     L = []
     for i in range(df.shape[0]):
         d = df.iloc[i].to_dict()
-        chrom = d['chr']
+        chrom = d['seqnames1']
         isin_bin = d['isin_bin']
         start1 = d['start1']
         end1 = d['end1']
@@ -80,8 +80,8 @@ def filter_loops_with_tss(df, df_tss):
     df_filtered = pd.DataFrame(
         L, 
         columns=[
-            'chr1', 'start1', 'end1', 'start2', 'end2', 'enhancer_summit', 
-            'enhancer_cluster', 'enh_bin', 'tss', 'gene', 'tss_bin'
+            'seqnames1', 'start1', 'end1', 'seqnames2', 'start2', 'end2', 
+            'enhancer_summit', 'enhancer_cluster', 'enh_bin', 'tss', 'gene', 'tss_bin'
         ]
     )
 

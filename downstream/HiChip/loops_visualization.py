@@ -17,47 +17,83 @@ matplotlib.rcParams["axes.formatter.use_mathtext"] = False
 
 # Paths
 path_main = '/Users/IEO5505/Desktop/fragile_enhancer_clinical'
-path_cool = os.path.join(path_main, 'data', 'Hi_Chip', 'cool')
-path_loops = os.path.join(path_main, 'data', 'Hi_Chip', 'loops')
-path_results = os.path.join(path_main, 'results', 'Hi_Chip')
+path_cool = os.path.join(path_main, 'data', 'functional_genomics', 'HiChip', 'mcool')
+path_results = os.path.join(path_main, 'results', 'integrated')
 
 
 ##
 
 
 # Read .mcool and regions
-sample = 'KD_pool_120'
-cooler.fileops.list_coolers(os.path.join(path_cool, f'{sample}.mcool'))
-C = { 
+
+# SCR
+sample = 'SCR'
+# cooler.fileops.list_coolers(os.path.join(path_cool, f'{sample}.mcool'))
+C_SCR = { 
     '2000' : cooler.Cooler(os.path.join(path_cool, f'{sample}.mcool::resolutions/2000')), 
+    '4000' : cooler.Cooler(os.path.join(path_cool, f'{sample}.mcool::resolutions/4000')), 
     '8000' : cooler.Cooler(os.path.join(path_cool, f'{sample}.mcool::resolutions/8000')), 
-    '16000' : cooler.Cooler(os.path.join(path_cool, f'{sample}.mcool::resolutions/16000')), 
-    '32000' : cooler.Cooler(os.path.join(path_cool, f'{sample}.mcool::resolutions/32000')), 
 }
 
+# KD
+sample = 'KD'
+C_KD = { 
+    '2000' : cooler.Cooler(os.path.join(path_cool, f'{sample}.mcool::resolutions/2000')), 
+    '4000' : cooler.Cooler(os.path.join(path_cool, f'{sample}.mcool::resolutions/4000')), 
+    '8000' : cooler.Cooler(os.path.join(path_cool, f'{sample}.mcool::resolutions/8000')), 
+}
+
+
 # Read loops
-df_loops = pd.read_csv(os.path.join(path_results, 'SCR_CtIP_enh_loops.csv'), index_col=0)
+df_loops = pd.read_csv(os.path.join(path_results, 'prova_loops.csv'), index_col=0)
 
 
 ##
 
 
-# Plot loop
-# chr20_352000_354000_chr_20_388000_390000
-chrom = '20'
-start = 350000
-end = 392000
-res = '2000'
-vmax_raw = 30
-vmax_balanced = .02
+# Plot loops
 
-fig, ax = plt.subplots(figsize=(7,7))
-plot_region(C[res], chrom, start, end, balance=False, lognorm=False, vmax=vmax_raw, ax=ax)
+# 1
+title = f'CtIP enhancer cluster 2 (summit chr8:{102449518}) vs GRHL2 TSS (chr8:{102504667})'
+chrom = '8'
+start = 102448000
+end = 102508000 
+res = '4000'
+span = 18000
+vmax = .1
+balance = True
+lognorm = True
+norm = 'ICE'
+
+fig, axs = plt.subplots(1,2,figsize=(10,5))
+plot_region(C_SCR[res], chrom, start-span, end+span, balance=balance, lognorm=lognorm, vmax=vmax, ax=axs[0]) 
+plot_region(C_KD[res], chrom, start-span, end+span, balance=balance, lognorm=lognorm, vmax=vmax, ax=axs[1])
 fig.tight_layout()
-plt.show()
-# fig.subplots_adjust(top=.9, bottom=.15, left=.2, right=.8, wspace=.3, hspace=.2)
-# fig.suptitle(f'{gene} locus, binsize {res} kb')
-# fig.savefig(os.path.join(path_results, f'{sample}_{gene}_{res}.png'), dpi=300)
+fig.suptitle(f'{title}, {res} bp')
+fig.savefig(os.path.join(path_results, f'{title}_{res}_kb_{norm}.png'), dpi=300)
+
+
+##
+
+
+# 2
+title = f'CtIP enhancer cluster 2 (summit chr1:{201277106}) vs LAD1 TSS (chr1:{201368452})'
+chrom = '1'
+start = 201276000
+end = 201372000 
+res = '4000'
+span = 30000
+vmax = .1
+balance = True
+lognorm = True
+norm = 'ICE'
+
+fig, axs = plt.subplots(1,2,figsize=(10,5))
+plot_region(C_SCR[res], chrom, start-span, end+span, balance=balance, lognorm=lognorm, vmax=vmax, ax=axs[0]) 
+plot_region(C_KD[res], chrom, start-span, end+span, balance=balance, lognorm=lognorm, vmax=vmax, ax=axs[1])
+fig.tight_layout()
+fig.suptitle(f'{title}, {res} bp')
+fig.savefig(os.path.join(path_results, f'{title}_{res}_kb_{norm}.png'), dpi=300)
 
 
 ##
