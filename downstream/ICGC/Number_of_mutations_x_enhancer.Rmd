@@ -8,6 +8,7 @@ date: "2024-02-27"
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(GenomicRanges)
+library(ggpubr) # to add p-values to plots
 
 SEED <- 4321
 set.seed(SEED)
@@ -18,6 +19,7 @@ set.seed(SEED)
 # Functions 
 
 compute_stat_enhancers2 <- function(input_overlaps, source_enhancers_df){
+  
   df_all_stats <- data.frame(matrix(ncol = length(input_overlaps)+1, # +1 to store enh names 
                                     nrow = dim(source_enhancers_df[[1]])[1]))
   colnames(df_all_stats) <- c("name", "n_donors_hit")
@@ -47,44 +49,49 @@ compute_stat_enhancers2 <- function(input_overlaps, source_enhancers_df){
 ```
 
 
+```{r}
+source("/Users/ieo6983/Desktop/fragile_enhancer_clinical/utils/functions_genomics.R")
+
+IN_FOLDER <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/"
+OUT_FOLDER_DATA <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/"
+OUT_FOLDER_PLOTS <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/plots/"
+
+```
 
 
 ### INPUT DATA ###
 ```{r}
-setwd("/Users/ieo6983/Desktop/fragile_enhancer_clinical/")
-
-SSMs <- read_tsv("./data/genomics/pre_processed_ICGC/simple_somatic_mutation.open.matching_calls.tsv")
-ENH <- read_tsv("./data/functional_genomics/others/Cluster_enhancers_all.txt") 
-PUT_ENH <- read_tsv("./data/functional_genomics/others/PutativeEnhnacers_MCF10A_hg19.filtered_GRHL_CtIP_MRE11_self.tsv") 
-
-
-
-# SSMs 
+# SSMs
+SSMs <- read_tsv(paste(IN_FOLDER, "./data/genomics/pre_processed_ICGC/simple_somatic_mutation.open.matching_calls.tsv", sep=""))
 SSMs <- SSMs[, -c(9,14)]
 colnames(SSMs)[c(7,8)] <- c("start", "end") 
 SSMs$chromosome <- paste("chr", SSMs$chromosome, sep = "")
 SSMs_gr <- makeGRangesFromDataFrame(SSMs, keep.extra.columns = T)
 
-# ALL ENHANCERS: CtIP, GRHL, MRE11
-colnames(ENH)[1] <- "chrom" 
-ENH$summit <- ENH$start # add summit location
+
+# ALL enhancers: CtIP, GRHL
+columns_names <- c("chrom", "start", "end", "cluster")
+enh_ctip <- read_tsv(paste(IN_FOLDER, "data/functional_genomics/others/Cluster_CtIP_Enh_All.txt", sep=""), col_names = columns_names,
+                     comment = "#")
+enh_grhl <- read_tsv(paste(IN_FOLDER, "data/functional_genomics/others/Cluster_GRHL_Enh_All.txt", sep=""), col_names = columns_names,
+                     comment = "#")
+enh_all <- list("CtIP" = enh_ctip, "GRHL" = enh_grhl)
+# add summit & name
+enh_all <- lapply(enh_all, function(df){
+  df$summit <- df$end
+  df$name <- str_c(df$chrom, df$summit, sep=":")
+  return(df)})
+
 
 # Putative enhancers: H3K27ac (no CtIP, GRHL, MRE11, self_overlaps)
-colnames(PUT_ENH)[1] <- "chrom" 
-PUT_ENH$summit <- PUT_ENH$start # add summit location
-
-
-```
-
+put_enhancers <- read_tsv(paste(IN_FOLDER, "data/functional_genomics/others/PutativeEnhnacers_MCF10A_hg19.filtered_GRHL_CtIP_MRE11_self.tsv", sep=""))
+colnames(put_enhancers)[1] <- "chrom" 
+put_enhancers$summit <- put_enhancers$end
 
 
 ### 
-```{r}
-OUT_FOLDER_DATA <- "~/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/"
-OUT_FOLDER_PLOTS <- "~/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/plots/"
-
 WIN <- 500
-MARKERS <- c("CtIP", "GRHL") 
+MARKERS <- names(enh_all)
 
 ```
 
@@ -96,15 +103,544 @@ input_variants <- SSMs
 input_variants_gr <- SSMs_gr
 
 
-
-for(m in MARKERS){
-  print(m)
-  marker <- m
+for(marker in MARKERS){
   mut <- "SSMs"
+  
   
   ### Pre/process input data ###
   # CtIP/GRHL enhancers
-  marker_enh <- ENH[startsWith(ENH$deepTools_group, marker), ] # select enhancer with 'marker'
+  marker_enh <- enh_all[[marker]] # select enhancer with 'marker'
+  
+  ## Extend regions of 'win' from summit
+  marker_enh$start <- marker_enh$summit - WIN
+  marker_enh$end <- marker_enh$summit + WIN
+  
+  # Create GRanges objects 
+  enh_gr <- makeGRangesFromDataFrame(marker_enh, keep.extra.columns = T)
+  
+  
+  ### Find mutations / enhancers overlaps ###
+  # CtIP/GRHL enhancers - overlap with matching SSMs 
+  hits_obj_enh <- findOverlaps(query=enh_gr, subject=input_variants_gr)
+  SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_enh)])
+  colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_") 
+  enh_SSMs <- cbind(data.frame(enh_gr[queryHits(hits_obj_enh)]), SSMs_sbj)
+  
+  
+  ### Compute stats
+  # Number of donors that each enhancer hit
+  classes = "n_donors_hit"
+  stat_enh <- compute_stat_enhancers2(list(enh_SSMs), list(marker_enh)) 
+  
+  # Number of mutations within each enahncer
+  enh_SSMs$mut_coord_id <- str_c(enh_SSMs$seqnames_sbj, enh_SSMs$start_sbj, enh_SSMs$end_sbj, sep = "_")
+  
+  n_muts_enh <- enh_SSMs %>% group_by(name) %>% 
+  dplyr::summarise(n_muts = length(unique(mut_coord_id))) %>%
+  ungroup() %>%
+  dplyr::select(name, n_muts) 
+  n_muts_enh <- arrange(n_muts_enh, desc(n_muts_enh$n_muts))
+  
+  p <- n_muts_enh %>%
+  ggplot(., aes(x = n_muts))+
+  geom_histogram()+
+    theme_light()+
+    labs(title = paste("Number of mutations within each ", marker, " enhancer", sep =""), 
+         x = "Number of mutations", y = "")
+  print(p)
+ 
+  
+  # Dotplot
+  for_dot <- left_join(stat_enh, n_muts_enh, by = "name")
+  for_dot$n_muts[is.na(for_dot$n_muts)] <- 0
+  
+  scatter <- for_dot %>% 
+      ggplot(., aes(x = n_donors_hit, y = n_muts))+
+        geom_count(aes(size = ..n..), color = "blue3")+
+        scale_size_continuous(range = c(2, 10))+
+        theme_light()+
+        labs(title = paste(marker, " enhancers - Win = ", WIN, " bp", sep = ""),
+          y = "Number of mutations within enhancer", 
+          x = "Number of donors")+
+        theme(axis.text = element_text(size = 12),
+              axis.title = element_text(size = 16),
+              title = element_text(size = 16))+
+        scale_y_continuous(n.breaks = 7)+
+        scale_x_continuous(n.breaks = 8)
+    print(scatter)
+  
+  # Saving number of mutations x enhancer for the future
+  #write_tsv(n_muts_enh, paste(OUT_FOLDER_DATA, paste("Number_of_mutations_x_enhancer", marker, mut, sep="_"), sep =""))
+  
+  #ggsave(paste(paste(OUT_FOLDER_PLOTS, paste("Number_mutations_vs_number_donors", marker, mut, sep ="_"), sep = ""), ".png", sep = ""), plot = scatter, device = "png", width = 10, height = 7)
+
+}
+
+```
+
+
+
+
+### Number of mutations x enhancers ###
+Boxplots with controls (CtIP-high, CtIP-low, random seqs)
+
+_Definition of High-low clusters_
+# Option 1: High = primi 3; Low = ultimi 4
+clust_high_ctip <- c("CtIP_cluster_2_Enh", "CtIP_cluster_3_Enh", "CtIP_cluster_5_Enh")
+clust_high_grhl <- c("GRHL_cluster_1_Enh", "GRHL_cluster_2_Enh", "GRHL_cluster_4_Enh")
+clust_low_ctip <- c("CtIP_cluster_6.2_Enh", "CtIP_cluster_6.3_Enh", "CtIP_cluster_6.1_Enh", "CtIP_cluster_6.0")
+clust_low_grhl <- c("GRHL_cluster_5.2_Enh", "GRHL_cluster_5.3_Enh", "GRHL_cluster_5.1_Enh", "GRHL_cluster_5.0")
+# Option 2: High = primi 4; Low = ultimi 3
+clust_high_ctip <- c("CtIP_cluster_2_Enh", "CtIP_cluster_3_Enh", "CtIP_cluster_5_Enh", "CtIP_cluster_6.2_Enh")
+clust_high_grhl <- c("GRHL_cluster_1_Enh", "GRHL_cluster_2_Enh", "GRHL_cluster_4_Enh", "GRHL_cluster_5.2_Enh")
+clust_low_ctip <- c("CtIP_cluster_6.3_Enh", "CtIP_cluster_6.1_Enh", "CtIP_cluster_6.0")
+clust_low_grhl <- c("GRHL_cluster_5.3_Enh", "GRHL_cluster_5.1_Enh", "GRHL_cluster_5.0")
+# Option 3: High = primi 5; Low = utlimi 2
+clust_high_ctip <- c("CtIP_cluster_2_Enh", "CtIP_cluster_3_Enh", "CtIP_cluster_5_Enh", "CtIP_cluster_6.2_Enh", "CtIP_cluster_6.3_Enh")
+clust_high_grhl <- c("GRHL_cluster_1_Enh", "GRHL_cluster_2_Enh", "GRHL_cluster_4_Enh", "GRHL_cluster_5.2_Enh", "GRHL_cluster_5.2_Enh")
+clust_low_ctip <- c("CtIP_cluster_6.1_Enh", "CtIP_cluster_6.0")
+clust_low_grhl <- c("GRHL_cluster_5.1_Enh", "GRHL_cluster_5.0")
+```{r}
+# Definition of which are high and which low clusters
+# Option 1: High = primi 3; Low = ultimi 4
+clust_high_ctip <- c("CtIP_cluster_2_Enh", "CtIP_cluster_3_Enh", "CtIP_cluster_5_Enh")
+clust_high_grhl <- c("GRHL_cluster_1_Enh", "GRHL_cluster_2_Enh", "GRHL_cluster_4_Enh")
+clust_low_ctip <- c("CtIP_cluster_6.2_Enh", "CtIP_cluster_6.3_Enh", "CtIP_cluster_6.1_Enh", "CtIP_cluster_6.0")
+clust_low_grhl <- c("GRHL_cluster_5.2_Enh", "GRHL_cluster_5.3_Enh", "GRHL_cluster_5.1_Enh", "GRHL_cluster_5.0")
+
+clust_high <- list("CtIP" = clust_high_ctip, "GRHL" = clust_high_grhl)
+clust_low <- list("CtIP" = clust_low_ctip, "GRHL" = clust_low_grhl)
+clust_all <- list("high" = clust_high, "low" = clust_low)
+
+```
+
+
+```{r}
+input_variants <- SSMs
+input_variants_gr <- SSMs_gr
+
+save_plots <- FALSE
+max_dim <- max(sapply(enh_all, function(df) dim(df)[1]))
+number_mutations_x_enhancer <- list("CtIP" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
+                                                        "low" = rep(NA, max_dim), "low_ctrl" = rep(NA, max_dim)), 
+                                    "GRHL" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
+                                                        "low" = rep(NA, max_dim), "low_ctrl" = rep(NA, max_dim)))
+
+for(marker in MARKERS){
+  mut <- "SSMs"
+  
+  # CtIP/GRHL enhancers
+  marker_enh <- enh_all[[marker]] # select enhancer with 'marker'
+
+  for(cluster in c("high", "low")){
+    marker_enh_clust <- marker_enh[marker_enh$cluster %in% clust_all[[cluster]][[marker]], ]
+    
+    ## Extend regions of 'win' from summit
+    marker_enh_clust$start <- marker_enh_clust$summit - WIN
+    marker_enh_clust$end <- marker_enh_clust$summit + WIN
+    
+    # Generate random input sequences 
+    ran_seqs <- generate_random_seqs(SEED, dim(marker_enh_clust)[1], win = WIN)
+    # Create GRanges objects 
+    enh_gr <- makeGRangesFromDataFrame(marker_enh_clust, keep.extra.columns = T)
+    ran_seqs_gr = makeGRangesFromDataFrame(ran_seqs, keep.extra.columns = T)
+    
+    
+    ### Find mutations / enhancers overlaps ###
+    # CtIP/GRHL enhancers - overlap with matching SSMs 
+    hits_obj_enh <- findOverlaps(query=enh_gr, subject=input_variants_gr)
+    SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_enh)])
+    colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+    enh_SSMs <- cbind(data.frame(enh_gr[queryHits(hits_obj_enh)]), SSMs_sbj) 
+    # Random sequences
+    hits_obj_ran <- findOverlaps(query=ran_seqs_gr, subject=input_variants_gr)
+    SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_ran)])
+    colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+    ran_seqs_SSMs <- cbind(data.frame(ran_seqs_gr[queryHits(hits_obj_ran)], SSMs_sbj))
+  
+    # Number of mutations within each enhancer
+    enh_SSMs$mut_coord_id <- str_c(enh_SSMs$seqnames_sbj, enh_SSMs$start_sbj, enh_SSMs$end_sbj, sep = "_")
+    ran_seqs_SSMs$mut_coord_id <- str_c(ran_seqs_SSMs$seqnames_sbj, ran_seqs_SSMs$start_sbj, ran_seqs_SSMs$end_sbj, 
+                                        sep = "_")
+        
+    n_muts_enh <- enh_SSMs %>% group_by(name) %>% 
+      dplyr::summarise(n_muts = length(unique(mut_coord_id))) %>%
+      ungroup() %>%
+      dplyr::select(name, n_muts) 
+    n_muts_enh <- arrange(n_muts_enh, desc(n_muts_enh$n_muts))
+      
+    n_muts_ran <- ran_seqs_SSMs %>% group_by(name) %>% 
+      dplyr::summarise(n_muts = length(unique(mut_coord_id))) %>%
+      ungroup() %>%
+      dplyr::select(name, n_muts) 
+    n_muts_ran <- arrange(n_muts_ran, desc(n_muts_ran$n_muts))
+    
+    number_mutations_x_enhancer[[marker]][, cluster] <- c(n_muts_enh$n_muts, rep(NA, max_dim-length(n_muts_enh$n_muts)))
+    number_mutations_x_enhancer[[marker]][, paste(cluster, "ctrl", sep="_")] <- c(n_muts_ran$n_muts, 
+                                                                                  rep(NA, max_dim-length(n_muts_ran$n_muts)))
+    
+  }
+}
+
+
+## Plot mutation frequency x enhancer + CTRLs ##
+for(marker in MARKERS){
+  df <- number_mutations_x_enhancer[[marker]] 
+  df_pivot <- df %>% pivot_longer(everything(), names_to="cluster", values_to="n_muts") %>%
+  mutate(., group = ifelse(startsWith(cluster,"high"), "high", "low"))
+  
+  print("Average")
+  m_high <- round(mean(df$high, na.rm =T),2)
+  m_high_ctrl <- round(mean(df$high_ctrl, na.rm=T),2)
+  m_low <- round(mean(df$low, na.rm=T),2)
+  m_low_ctrl <- round(mean(df$low_ctrl, na.rm =T),2)
+  print(m_high); print(m_high_ctrl); print(m_low); print(m_low_ctrl)
+  
+  p <- df_pivot %>% ggplot(., aes(x = cluster, y = n_muts, fill = group))+
+    geom_boxplot()+
+    theme_light()+
+    labs(title = paste("Number of mutations x enhancer - ", marker, sep=""),
+        y = "Number of mutations", x = "")+
+    stat_compare_means(method = "wilcox.test", 
+                       label = "p.format", 
+                       size = 3, 
+                       comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
+  print(p)
+  
+  if(save_plots == T){
+  ggsave(plot = p, filename = paste(OUT_FOLDER_PLOTS, paste("Number_", mut, "_x_enhancer.", marker, "_high_low_and_controls.png", sep=""), sep=""), device = "png", width = 10, height = 7)
+  }
+  
+}
+
+```
+
+
+## Multiple sampling of random genomic regions ###
+```{r}
+start_time <- Sys.time()
+
+n_samples <- 1000
+start_seed <- 4321
+number_of_mutations_x_random <- list("CtIP" = data.frame("avg_high" = rep(NA, n_samples), "avg_low" = rep(NA, n_samples)), 
+                                     "GRHL" = data.frame("avg_high" = rep(NA, n_samples), "avg_low" = rep(NA, n_samples)))
+
+
+random_sampling <- FALSE
+if(random_sampling == T){
+    for(marker in MARKERS){
+      
+      # select appropriate cluster of enhancers to sample the same number of random regions
+      marker_enh <- enh_all[[marker]] 
+      
+      for(cluster in c("high", "low")){
+        marker_enh_clust <- marker_enh[marker_enh$cluster %in% clust_all[[cluster]][[marker]], ]
+        
+        random_regions_avgs <- data.frame(matrix(ncol = 1, nrow = n_samples, dimnames = list(NULL, "avg_n_muts")))
+        for(i in 1:n_samples){
+          # Generate random input sequences 
+          ran_seqs <- generate_random_seqs(start_seed+i, dim(marker_enh_clust)[1], win = WIN)
+          ran_seqs_gr = makeGRangesFromDataFrame(ran_seqs, keep.extra.columns = T)
+                
+          hits_obj_ran <- findOverlaps(query=ran_seqs_gr, subject=input_variants_gr)
+          SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_ran)])
+          colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+          ran_seqs_SSMs <- cbind(data.frame(ran_seqs_gr[queryHits(hits_obj_ran)], SSMs_sbj))
+                
+          ran_seqs_SSMs$mut_coord_id <- str_c(ran_seqs_SSMs$seqnames_sbj, ran_seqs_SSMs$start_sbj, ran_seqs_SSMs$end_sbj, sep = "_")
+          n_muts_ran <- ran_seqs_SSMs %>% group_by(name) %>% 
+            dplyr::summarise(n_muts = length(unique(mut_coord_id))) %>%
+            ungroup() %>%
+            dplyr::select(name, n_muts) 
+                
+          # Average number of mutations within random genomic regions, for each random sample
+          random_regions_avgs[i,] <- round(mean(n_muts_ran$n_muts, na.rm=T),3)
+          }
+              
+        # Store everything in one df for later
+        number_of_mutations_x_random[[marker]][, paste("avg", cluster, sep="_")] <- random_regions_avgs$avg_n_muts
+    
+      }
+      
+    }
+  
+}
+
+end_time <- Sys.time()
+print(end_time - start_time)
+```
+
+```{r}
+number_of_mutations_x_random.1000 <- number_of_mutations_x_random
+#write_tsv(number_of_mutations_x_random.1000[["CtIP"]], paste(OUT_FOLDER_DATA, paste("Avg_number_of_mutations.1000_random_samples.CtIP_high_low_clusters_option1.tsv"), sep =""))
+#write_tsv(number_of_mutations_x_random.1000[["GRHL"]], paste(OUT_FOLDER_DATA, paste("Avg_number_of_mutations.1000_random_samples.GRHL_high_low_clusters_option1.tsv"), sep =""))
+
+```
+
+```{r}
+# Option 1
+number_of_mutations_x_random.1000.ctip <- read_tsv(paste(OUT_FOLDER_DATA, "Avg_number_of_mutations.1000_random_samples.CtIP_high_low_clusters_option1.tsv", sep=""))
+number_of_mutations_x_random.1000.grhl <- read_tsv(paste(OUT_FOLDER_DATA, "Avg_number_of_mutations.1000_random_samples.GRHL_high_low_clusters_option1.tsv", sep=""))
+
+number_of_mutations_x_random.1000 <- list("CtIP" = number_of_mutations_x_random.1000.ctip, 
+                                          "GRHL" = number_of_mutations_x_random.1000.grhl)
+
+
+for(marker in MARKERS){
+  for(cluster in c("avg_high", "avg_low")){
+    # Compute average number of mutations within enhancers for each groups of interest ('case')
+    group <- str_sub(cluster, start = 5L)
+    case_counts <- number_mutations_x_enhancer[[marker]][, group]
+    case_avg <- round(mean(case_counts, na.rm = T),3) 
+    
+    ph <- number_of_mutations_x_random.1000[[marker]] %>% 
+      ggplot(., aes(x = .[[cluster]]))+
+      geom_vline(xintercept = case_avg, color = "red", show.legend = T)+
+      annotate("text", x = case_avg+0.021, y = 90, label = paste("Average","\n", "within enhancers"), color = "red")+
+      geom_histogram()+
+      labs(title = sprintf("Average number of mutations within random regions - %d draws", n_samples), 
+           subtitle = sprintf("Marker: %s Cluster: %s", marker, group),
+           x = "Average n. of mutations")+
+      theme_light()
+    print(ph)
+    
+  }
+}
+
+
+```
+
+
+
+
+### Number of donors mutated x enhancers ###
+Boxplots with controls (CtIP-high, CtIP-low, random seqs)
+```{r}
+input_variants <- SSMs
+input_variants_gr <- SSMs_gr
+
+save_plots <- FALSE
+max_dim <- max(sapply(enh_all, function(df) dim(df)[1]))
+number_donors_x_enhancer <- list("CtIP" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
+                                                      "low" = rep(NA, max_dim), "low_ctrl" = rep(NA, max_dim)), 
+                                 "GRHL" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
+                                                      "low" = rep(NA, max_dim), "low_ctrl" = rep(NA, max_dim)))
+
+for(marker in MARKERS){
+  mut <- "SSMs"
+  
+  # CtIP/GRHL enhancers
+  marker_enh <- enh_all[[marker]] # select enhancer with 'marker'
+
+  for(cluster in c("high", "low")){
+    marker_enh_clust <- marker_enh[marker_enh$cluster %in% clust_all[[cluster]][[marker]], ]
+    
+    ## Extend regions of 'win' from summit
+    marker_enh_clust$start <- marker_enh_clust$summit - WIN
+    marker_enh_clust$end <- marker_enh_clust$summit + WIN
+    
+    # Generate random input sequences 
+    ran_seqs <- generate_random_seqs(SEED, dim(marker_enh_clust)[1], win = WIN)
+    # Create GRanges objects 
+    enh_gr <- makeGRangesFromDataFrame(marker_enh_clust, keep.extra.columns = T)
+    ran_seqs_gr = makeGRangesFromDataFrame(ran_seqs, keep.extra.columns = T)
+    
+    
+    ### Find mutations / enhancers overlaps ###
+    # CtIP/GRHL enhancers - overlap with matching SSMs 
+    hits_obj_enh <- findOverlaps(query=enh_gr, subject=input_variants_gr)
+    SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_enh)])
+    colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+    enh_SSMs <- cbind(data.frame(enh_gr[queryHits(hits_obj_enh)]), SSMs_sbj) 
+    # Random sequences
+    hits_obj_ran <- findOverlaps(query=ran_seqs_gr, subject=input_variants_gr)
+    SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_ran)])
+    colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+    ran_seqs_SSMs <- cbind(data.frame(ran_seqs_gr[queryHits(hits_obj_ran)], SSMs_sbj))
+  
+
+    # Number of donors mutated x enhancer
+    n_don_enh <- enh_SSMs %>% dplyr::group_by(name) %>%
+      dplyr::summarise(., n_donors_hit = length(unique(icgc_donor_id)))
+    n_don_ran <- ran_seqs_SSMs %>% dplyr::group_by(name) %>%
+      dplyr::summarise(., n_donors_hit = length(unique(icgc_donor_id)))
+    
+    
+    number_donors_x_enhancer[[marker]][, cluster] <- c(n_don_enh$n_donors_hit, rep(NA, max_dim-length(n_don_enh$n_donors_hit)))
+    number_donors_x_enhancer[[marker]][, paste(cluster, "ctrl", sep="_")] <- c(n_don_ran$n_donors_hit, 
+                                                                            rep(NA, max_dim-length(n_don_ran$n_donors_hit)))
+    
+  }
+}
+
+
+
+## Plot number of donors hit x enhancer + CTRLs ##
+for(marker in MARKERS){
+  df <- number_donors_x_enhancer[[marker]] 
+  df_pivot <- df %>% pivot_longer(everything(), names_to="cluster", values_to="n") %>%
+  mutate(., group = ifelse(startsWith(cluster,"high"), "high", "low"))
+  
+  print("Average")
+  m_high <- round(mean(df$high, na.rm =T),2)
+  m_high_ctrl <- round(mean(df$high_ctrl, na.rm=T),2)
+  m_low <- round(mean(df$low, na.rm=T),2)
+  m_low_ctrl <- round(mean(df$low_ctrl, na.rm =T),2)
+  print(m_high); print(m_high_ctrl); print(m_low); print(m_low_ctrl)
+  
+  p <- df_pivot %>% ggplot(., aes(x = cluster, y = n, fill = group))+
+    geom_boxplot()+
+    theme_light()+
+    labs(title = paste("Number of donors mutates x enhancer - ", marker, sep=""),
+        y = "Number of donors", x = "")+
+    scale_fill_manual(values = c("darkviolet", "darkolivegreen3"))+
+    stat_compare_means(method = "wilcox.test", 
+                       label = "p.format", 
+                       size = 3, 
+                       comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
+  print(p)
+  
+  if(save_plots == T){
+  ggsave(plot = p, filename = paste(OUT_FOLDER_PLOTS, paste("Number_donors_x_enhancer.", mut, "_", marker, "_high_low_and_controls.png", sep=""), sep=""), device = "png", width = 10, height = 7)
+  }
+}
+
+```
+
+
+
+
+### Number of enhancers mutated x donor ###
+Boxplots with controls (CtIP-high, CtIP-low, random seqs)
+```{r}
+input_variants <- SSMs
+input_variants_gr <- SSMs_gr
+
+save_plots <- FALSE
+max_dim <- max(sapply(enh_all, function(df) dim(df)[1]))
+number_enhancers_x_donor <- list("CtIP" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
+                                                     "low" = rep(NA, max_dim), "low_ctrl" = rep(NA, max_dim)), 
+                                  "GRHL" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
+                                                      "low" = rep(NA, max_dim), "low_ctrl" = rep(NA, max_dim)))
+
+for(marker in MARKERS){
+  mut <- "SSMs"
+  
+  # CtIP/GRHL enhancers
+  marker_enh <- enh_all[[marker]] # select enhancer with 'marker'
+
+  for(cluster in c("high", "low")){
+    marker_enh_clust <- marker_enh[marker_enh$cluster %in% clust_all[[cluster]][[marker]], ]
+    
+    ## Extend regions of 'win' from summit
+    marker_enh_clust$start <- marker_enh_clust$summit - WIN
+    marker_enh_clust$end <- marker_enh_clust$summit + WIN
+    
+    # Generate random input sequences 
+    ran_seqs <- generate_random_seqs(SEED, dim(marker_enh_clust)[1], win = WIN)
+    # Create GRanges objects 
+    enh_gr <- makeGRangesFromDataFrame(marker_enh_clust, keep.extra.columns = T)
+    ran_seqs_gr = makeGRangesFromDataFrame(ran_seqs, keep.extra.columns = T)
+    
+    
+    ### Find mutations / enhancers overlaps ###
+    # CtIP/GRHL enhancers - overlap with matching SSMs 
+    hits_obj_enh <- findOverlaps(query=enh_gr, subject=input_variants_gr)
+    SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_enh)])
+    colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+    enh_SSMs <- cbind(data.frame(enh_gr[queryHits(hits_obj_enh)]), SSMs_sbj) 
+    # Random sequences
+    hits_obj_ran <- findOverlaps(query=ran_seqs_gr, subject=input_variants_gr)
+    SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_ran)])
+    colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+    ran_seqs_SSMs <- cbind(data.frame(ran_seqs_gr[queryHits(hits_obj_ran)], SSMs_sbj))
+  
+
+    # Number of enhancers mutated x enhancer
+    n_enh_mut <- enh_SSMs %>% dplyr::group_by(icgc_donor_id) %>%
+      dplyr::summarise(., n_enh_hit = length(unique(name)))
+    n_ran_mut <- ran_seqs_SSMs %>% dplyr::group_by(icgc_donor_id) %>%
+      dplyr::summarise(., n_ran_hit = length(unique(name)))
+    
+    
+    number_enhancers_x_donor[[marker]][, cluster] <- c(n_enh_mut$n_enh_hit, rep(NA, max_dim-length(n_enh_mut$n_enh_hit)))
+    number_enhancers_x_donor[[marker]][, paste(cluster, "ctrl", sep="_")] <- c(n_ran_mut$n_ran_hit, 
+                                                                            rep(NA, max_dim-length(n_ran_mut$n_ran_hit)))
+    
+  }
+}
+
+
+
+## Plot number of enhancers mutated x donor + CTRLs ##
+for(marker in MARKERS){
+  df <- number_enhancers_x_donor[[marker]] 
+  df_pivot <- df %>% pivot_longer(everything(), names_to="cluster", values_to="n") %>%
+  mutate(., group = ifelse(startsWith(cluster,"high"), "high", "low"))
+  
+  print("Average")
+  m_high <- round(mean(df$high, na.rm =T),2)
+  m_high_ctrl <- round(mean(df$high_ctrl, na.rm=T),2)
+  m_low <- round(mean(df$low, na.rm=T),2)
+  m_low_ctrl <- round(mean(df$low_ctrl, na.rm =T),2)
+  print(m_high); print(m_high_ctrl); print(m_low); print(m_low_ctrl)
+  
+  scale_log <- TRUE
+  p <- df_pivot %>% ggplot(., aes(x = cluster, y = n, fill = group))+
+    geom_boxplot()+
+    theme_light()+
+    labs(title = paste("Number of enhancers mutated x donor - ", marker, sep=""),
+        y = "Number of enhancers", x = "")+
+    scale_fill_manual(values = c("brown3", "deepskyblue3"))+
+    stat_compare_means(method = "wilcox.test", 
+                       label = "p.format", 
+                       size = 3, 
+                       comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
+  if(scale_log == TRUE){p <- p + scale_y_log10()}
+  
+  print(p)
+  
+  if(save_plots == T){
+  ggsave(plot = p, filename = paste(OUT_FOLDER_PLOTS, paste("Number_enhancers_x_donor.", mut, "_", marker, "_high_low_and_controls.png", sep=""), sep=""), device = "png", width = 10, height = 7)
+  }
+
+}
+
+```
+
+
+
+
+#### STSMs ####
+
+```{r}
+### INPUT FILES
+# STSMs - No start-end, but chrom_bkpt
+STSMs <- read_tsv(paste(IN_FOLDER, "data/genomics/pre_processed_ICGC/structural_somatic_mutation.preprocessed.tsv", sep=""))
+STSMs <- STSMs[, -c(10, 12, 15, 17)]
+STSMs$chrom <- paste("chr", STSMs$chrom, sep = "")
+STSMs$start <- STSMs$chrom_bkpt
+STSMs$end <- STSMs$chrom_bkpt
+
+STSMs_gr <- makeGRangesFromDataFrame(STSMs, keep.extra.columns = T)
+
+WIN <- 3000
+```
+
+
+# Number of mutations within each enhancer
+```{r}
+input_variants <- STSMs
+input_variants_gr <- STSMs_gr
+
+
+
+for(marker in MARKERS){
+  mut <- "STSMs"
+  
+  ### Pre/process input data ###
+  # CtIP/GRHL enhancers
+  marker_enh <- enh_all[[marker]] # select enhancer with 'marker'
   
   ## Extend regions of 'win' from summit
   marker_enh$start <- marker_enh$summit - WIN
@@ -115,8 +651,8 @@ for(m in MARKERS){
   
   ### Find mutations / enhancers overlaps ###
   # CtIP/GRHL enhancers - overlap with matching SSMs 
-  hits_obj_enh <- findOverlaps(query=enh_gr, subject=SSMs_gr)
-  SSMs_sbj <- data.frame(SSMs_gr[subjectHits(hits_obj_enh)])
+  hits_obj_enh <- findOverlaps(query=enh_gr, subject=input_variants_gr)
+  SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_enh)])
   colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
   enh_SSMs <- cbind(data.frame(enh_gr[queryHits(hits_obj_enh)]), SSMs_sbj)
   
@@ -165,13 +701,291 @@ for(m in MARKERS){
         scale_x_continuous(n.breaks = 8)
     print(scatter)
   
-  # Saving number of mutations x enhancer for the future
-  #write_tsv(n_muts_enh, paste(OUT_FOLDER_DATA, paste("Number_of_mutations_x_enhancer", marker, mut, sep="_"), sep =""))
-  
-  #ggsave(paste(paste(OUT_FOLDER_PLOTS, paste("Number_mutations_vs_number_donors", marker, mut, sep ="_"), sep = ""), ".png", sep = ""), plot = scatter, device = "png", width = 10, height = 7)
-
 }
 
 ```
 
+
+
+### Number of mutations x enhancers ###
+Boxplots with controls (CtIP-high, CtIP-low, random seqs)
+```{r}
+# Option 2: High = primi 3; Low = ultimi 4
+clust_high_ctip <- c("CtIP_cluster_2_Enh", "CtIP_cluster_3_Enh", "CtIP_cluster_5_Enh")
+clust_high_grhl <- c("GRHL_cluster_1_Enh", "GRHL_cluster_2_Enh", "GRHL_cluster_4_Enh")
+clust_low_ctip <- c("CtIP_cluster_6.2_Enh", "CtIP_cluster_6.3_Enh", "CtIP_cluster_6.1_Enh", "CtIP_cluster_6.0")
+clust_low_grhl <- c("GRHL_cluster_5.2_Enh", "GRHL_cluster_5.3_Enh", "GRHL_cluster_5.1_Enh", "GRHL_cluster_5.0")
+
+clust_high <- list("CtIP" = clust_high_ctip, "GRHL" = clust_high_grhl)
+clust_low <- list("CtIP" = clust_low_ctip, "GRHL" = clust_low_grhl)
+clust_all <- list("high" = clust_high, "low" = clust_low)
+```
+
+```{r}
+input_variants <- STSMs
+input_variants_gr <- STSMs_gr
+  
+max_dim <- max(sapply(enh_all, function(df) dim(df)[1]))
+number_mutations_x_enhancer <- list("CtIP" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
+                                                        "low" = rep(NA, max_dim), "low_ctrl" = rep(NA, max_dim)), 
+                                    "GRHL" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
+                                                        "low" = rep(NA, max_dim), "low_ctrl" = rep(NA, max_dim)))
+
+for(marker in MARKERS){
+  mut <- "STSMs"
+  
+  # CtIP/GRHL enhancers
+  marker_enh <- enh_all[[marker]] # select enhancer with 'marker'
+
+  for(cluster in c("high", "low")){
+    marker_enh_clust <- marker_enh[marker_enh$cluster %in% clust_all[[cluster]][[marker]], ]
+    
+    ## Extend regions of 'win' from summit
+    marker_enh_clust$start <- marker_enh_clust$summit - WIN
+    marker_enh_clust$end <- marker_enh_clust$summit + WIN
+    
+    # Generate random input sequences 
+    ran_seqs <- generate_random_seqs(SEED, dim(marker_enh_clust)[1], win = WIN)
+    # Create GRanges objects 
+    enh_gr <- makeGRangesFromDataFrame(marker_enh_clust, keep.extra.columns = T)
+    ran_seqs_gr = makeGRangesFromDataFrame(ran_seqs, keep.extra.columns = T)
+    
+    
+    ### Find mutations / enhancers overlaps ###
+    # CtIP/GRHL enhancers - overlap with matching SSMs 
+    hits_obj_enh <- findOverlaps(query=enh_gr, subject=input_variants_gr)
+    SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_enh)])
+    colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+    enh_SSMs <- cbind(data.frame(enh_gr[queryHits(hits_obj_enh)]), SSMs_sbj) 
+    # Random sequences
+    hits_obj_ran <- findOverlaps(query=ran_seqs_gr, subject=input_variants_gr)
+    SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_ran)])
+    colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+    ran_seqs_SSMs <- cbind(data.frame(ran_seqs_gr[queryHits(hits_obj_ran)], SSMs_sbj))
+  
+    # Number of mutations within each enahncer
+    enh_SSMs$mut_coord_id <- str_c(enh_SSMs$seqnames_sbj, enh_SSMs$start_sbj, enh_SSMs$end_sbj, sep = "_")
+    ran_seqs_SSMs$mut_coord_id <- str_c(ran_seqs_SSMs$seqnames_sbj, ran_seqs_SSMs$start_sbj, ran_seqs_SSMs$end_sbj, 
+                                        sep = "_")
+        
+    n_muts_enh <- enh_SSMs %>% group_by(name) %>% 
+      dplyr::summarise(n_muts = length(unique(mut_coord_id))) %>%
+      ungroup() %>%
+      dplyr::select(name, n_muts) 
+    n_muts_enh <- arrange(n_muts_enh, desc(n_muts_enh$n_muts))
+      
+    n_muts_ran <- ran_seqs_SSMs %>% group_by(name) %>% 
+      dplyr::summarise(n_muts = length(unique(mut_coord_id))) %>%
+      ungroup() %>%
+      dplyr::select(name, n_muts) 
+    n_muts_ran <- arrange(n_muts_ran, desc(n_muts_ran$n_muts))
+    
+    number_mutations_x_enhancer[[marker]][, cluster] <- c(n_muts_enh$n_muts, rep(NA, max_dim-length(n_muts_enh$n_muts)))
+    number_mutations_x_enhancer[[marker]][, paste(cluster, "ctrl", sep="_")] <- c(n_muts_ran$n_muts, 
+                                                                                  rep(NA, max_dim-length(n_muts_ran$n_muts)))
+    
+  }
+}
+
+
+
+## Plot mutation frequency x enhancer + CTRLs ##
+for(marker in MARKERS){
+  df <- number_mutations_x_enhancer[[marker]] 
+  df_pivot <- df %>% pivot_longer(everything(), names_to="cluster", values_to="n_muts") %>%
+  mutate(., group = ifelse(startsWith(cluster,"high"), "high", "low"))
+  
+  
+  p <- df_pivot %>% ggplot(., aes(x = cluster, y = n_muts, fill = group))+
+    geom_boxplot()+
+    theme_light()+
+    labs(title = paste("Number of mutations x enhancer - ", marker, sep=""),
+        y = "Number of mutations", x = "")+
+    stat_compare_means(method = "wilcox.test", 
+                       label = "p.format", 
+                       size = 3, 
+                       comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
+  print(p)
+}
+
+
+```
+
+
+
+### Number of donors mutated x enhancers ###
+Boxplots with controls (CtIP-high, CtIP-low, random seqs)
+```{r}
+input_variants <- STSMs
+input_variants_gr <- STSMs_gr
+
+  
+
+max_dim <- max(sapply(enh_all, function(df) dim(df)[1]))
+number_donors_x_enhancer <- list("CtIP" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
+                                                        "low" = rep(NA, max_dim), "low_ctrl" = rep(NA, max_dim)), 
+                                    "GRHL" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
+                                                        "low" = rep(NA, max_dim), "low_ctrl" = rep(NA, max_dim)))
+
+
+for(marker in MARKERS){
+  mut <- "STSMs"
+  
+  # CtIP/GRHL enhancers
+  marker_enh <- enh_all[[marker]] # select enhancer with 'marker'
+
+  for(cluster in c("high", "low")){
+    marker_enh_clust <- marker_enh[marker_enh$cluster %in% clust_all[[cluster]][[marker]], ]
+    
+    ## Extend regions of 'win' from summit
+    marker_enh_clust$start <- marker_enh_clust$summit - WIN
+    marker_enh_clust$end <- marker_enh_clust$summit + WIN
+    
+    # Generate random input sequences 
+    ran_seqs <- generate_random_seqs(SEED, dim(marker_enh_clust)[1], win = WIN)
+    # Create GRanges objects 
+    enh_gr <- makeGRangesFromDataFrame(marker_enh_clust, keep.extra.columns = T)
+    ran_seqs_gr = makeGRangesFromDataFrame(ran_seqs, keep.extra.columns = T)
+    
+    
+    ### Find mutations / enhancers overlaps ###
+    # CtIP/GRHL enhancers - overlap with matching SSMs 
+    hits_obj_enh <- findOverlaps(query=enh_gr, subject=input_variants_gr)
+    SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_enh)])
+    colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+    enh_SSMs <- cbind(data.frame(enh_gr[queryHits(hits_obj_enh)]), SSMs_sbj) 
+    # Random sequences
+    hits_obj_ran <- findOverlaps(query=ran_seqs_gr, subject=input_variants_gr)
+    SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_ran)])
+    colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+    ran_seqs_SSMs <- cbind(data.frame(ran_seqs_gr[queryHits(hits_obj_ran)], SSMs_sbj))
+  
+
+    # Number of donors mutated x enhancer
+    n_don_enh <- enh_SSMs %>% dplyr::group_by(name) %>%
+      dplyr::summarise(., n_donors_hit = length(unique(icgc_donor_id)))
+    n_don_ran <- ran_seqs_SSMs %>% dplyr::group_by(name) %>%
+      dplyr::summarise(., n_donors_hit = length(unique(icgc_donor_id)))
+    
+    
+    ##REMOVE##
+    number_donors_x_enhancer[[marker]][, cluster] <- c(n_don_enh$n_donors_hit, 
+                                                       rep(NA, max_dim-length(n_don_enh$n_donors_hit)))
+    number_donors_x_enhancer[[marker]][, paste(cluster, "ctrl", sep="_")] <- c(n_don_ran$n_donors_hit, 
+                                                                            rep(NA, max_dim-length(n_don_ran$n_donors_hit)))
+    
+  }
+}
+
+
+
+## Plot mutation frequency x enhancer + CTRLs ##
+for(marker in MARKERS){
+  df <- number_donors_x_enhancer[[marker]] 
+  df_pivot <- df %>% pivot_longer(everything(), names_to="cluster", values_to="n") %>%
+  mutate(., group = ifelse(startsWith(cluster,"high"), "high", "low"))
+  
+  
+  p <- df_pivot %>% ggplot(., aes(x = cluster, y = n, fill = group))+
+    geom_boxplot()+
+    theme_light()+
+    labs(title = paste("Number of donors mutates x enhancer - ", marker, sep=""),
+        y = "Number of donors", x = "")+
+    scale_fill_manual(values = c("darkviolet", "darkolivegreen3"))+
+    stat_compare_means(method = "wilcox.test", 
+                       label = "p.format", 
+                       size = 3, 
+                       comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
+  print(p)
+}
+
+```
+
+
+
+
+### Number of enhancers mutated x donor ###
+Boxplots with controls (CtIP-high, CtIP-low, random seqs)
+```{r}
+input_variants <- STSMs
+input_variants_gr <- STSMs_gr
+
+
+max_dim <- max(sapply(enh_all, function(df) dim(df)[1]))
+number_enhancers_x_donor <- list("CtIP" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
+                                                        "low" = rep(NA, max_dim), "low_ctrl" = rep(NA, max_dim)), 
+                                    "GRHL" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
+                                                        "low" = rep(NA, max_dim), "low_ctrl" = rep(NA, max_dim)))
+
+for(marker in MARKERS){
+  mut <- "STSMs"
+  
+  # CtIP/GRHL enhancers
+  marker_enh <- enh_all[[marker]] # select enhancer with 'marker'
+
+  for(cluster in c("high", "low")){
+    marker_enh_clust <- marker_enh[marker_enh$cluster %in% clust_all[[cluster]][[marker]], ]
+    
+    ## Extend regions of 'win' from summit
+    marker_enh_clust$start <- marker_enh_clust$summit - WIN
+    marker_enh_clust$end <- marker_enh_clust$summit + WIN
+    
+    # Generate random input sequences 
+    ran_seqs <- generate_random_seqs(SEED, dim(marker_enh_clust)[1], win = WIN)
+    # Create GRanges objects 
+    enh_gr <- makeGRangesFromDataFrame(marker_enh_clust, keep.extra.columns = T)
+    ran_seqs_gr = makeGRangesFromDataFrame(ran_seqs, keep.extra.columns = T)
+    
+    
+    ### Find mutations / enhancers overlaps ###
+    # CtIP/GRHL enhancers - overlap with matching SSMs 
+    hits_obj_enh <- findOverlaps(query=enh_gr, subject=input_variants_gr)
+    SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_enh)])
+    colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+    enh_SSMs <- cbind(data.frame(enh_gr[queryHits(hits_obj_enh)]), SSMs_sbj) 
+    # Random sequences
+    hits_obj_ran <- findOverlaps(query=ran_seqs_gr, subject=input_variants_gr)
+    SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_ran)])
+    colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+    ran_seqs_SSMs <- cbind(data.frame(ran_seqs_gr[queryHits(hits_obj_ran)], SSMs_sbj))
+  
+
+    # Number of donors mutated x enhancer
+    n_enh_mut <- enh_SSMs %>% dplyr::group_by(icgc_donor_id) %>%
+      dplyr::summarise(., n_enh_hit = length(unique(name)))
+    n_ran_mut <- ran_seqs_SSMs %>% dplyr::group_by(icgc_donor_id) %>%
+      dplyr::summarise(., n_ran_hit = length(unique(name)))
+    
+    
+    ##REMOVE##
+    number_enhancers_x_donor[[marker]][, cluster] <- c(n_enh_mut$n_enh_hit, 
+                                                       rep(NA, max_dim-length(n_enh_mut$n_enh_hit)))
+    number_enhancers_x_donor[[marker]][, paste(cluster, "ctrl", sep="_")] <- c(n_ran_mut$n_ran_hit, 
+                                                                            rep(NA, max_dim-length(n_ran_mut$n_ran_hit)))
+    
+  }
+}
+
+
+
+## Plot mutation frequency x enhancer + CTRLs ##
+for(marker in MARKERS){
+  df <- number_enhancers_x_donor[[marker]] 
+  df_pivot <- df %>% pivot_longer(everything(), names_to="cluster", values_to="n") %>%
+  mutate(., group = ifelse(startsWith(cluster,"high"), "high", "low"))
+  
+  p <- df_pivot %>% ggplot(., aes(x = cluster, y = n, fill = group))+
+    geom_boxplot()+
+    theme_light()+
+    labs(title = paste("Number of enhancers mutated x donor - ", marker, sep=""),
+        y = "Number of enhancers", x = "")+
+    scale_fill_manual(values = c("brown3", "deepskyblue3"))+
+    stat_compare_means(method = "wilcox.test", 
+                       label = "p.format", 
+                       size = 3, 
+                       comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
+  print(p)
+}
+
+```
 
