@@ -10,6 +10,8 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(GenomicRanges)
 library(reshape2)
+library(hrbrthemes) # fro theme_ipsum()
+library(moments) # to compute distribution skewness()
 
 SEED <- 4321
 set.seed(SEED)
@@ -70,7 +72,7 @@ for(marker in names(enh_all)){
   # CtIP/GRHL enhancers
   marker_enh <- enh_all[[marker]] # select enhancer with 'marker'
   # Putative enhancers
-  put_enh <- put_enhancers[sample(seq(1,dim(put_enhancers)[1]), size = dim(marker_enh)[1], replace = F), ] # sample a set of regions 
+  put_enh <- put_enhancers[sample(seq(1,dim(put_enhancers)[1]), size = dim(marker_enh)[1], replace = F), ]
   print(paste("Number of putative enhancers sampled: ", dim(put_enh)[1]))
 
   ### Extend regions of 'win' from summit
@@ -138,7 +140,7 @@ for(marker in names(enh_all)){
 save_plots <- FALSE
 
 label <- "clustered_enhancers"
-dist_clustered_plots <- list("CtIP" = setNames(replicate(length(unique(enh_all[["CtIP"]]$cluster)), list()),
+dist_clustered_hist <- list("CtIP" = setNames(replicate(length(unique(enh_all[["CtIP"]]$cluster)), list()),
                                                unique(enh_all[["CtIP"]]$cluster)), 
                              "GRHL" = setNames(replicate(length(unique(enh_all[["GRHL"]]$cluster)), list()),
                                                unique(enh_all[["GRHL"]]$cluster)))
@@ -184,7 +186,7 @@ for(marker in names(enh_all)){
       labs(title = NULL, 
            subtitle = cluster,
          x = "distance from summit", y = "")
-    dist_clustered_plots[[marker]][[cluster]] <- p
+    dist_clustered_hist[[marker]][[cluster]] <- p
     print(p)
     
   }
@@ -192,7 +194,7 @@ for(marker in names(enh_all)){
   # Save grid of plots 
   if(save_plots == T){
     title <- cowplot::ggdraw() + cowplot::draw_label(title, fontface = "bold")
-    cowplot::plot_grid(title, plotlist = dist_clustered_plots[[marker]], ncol = 1) %>%
+    cowplot::plot_grid(title, plotlist = dist_clustered_hist[[marker]], ncol = 1) %>%
     ggsave(., filename = paste(paste(OUT_FOLDER, 
                        paste("SNVs_distribution", marker, label, "binsize", win*2/nbins[1], "bp", sep="_"), sep=""), ".png", sep=""), 
         device = "png", width = 7, height = 18)
@@ -204,6 +206,200 @@ for(marker in names(enh_all)){
 ```
 
 
+# Density plot
+## SSMs distribution based on clusters ##
+```{r}
+save_hist <- FALSE
+save_density <- FALSE
+
+label <- "clustered_enhancers"
+win <- 3000
+dist_clustered_hist <- list("CtIP" = setNames(replicate(length(unique(enh_all[["CtIP"]]$cluster)), list()),
+                                               unique(enh_all[["CtIP"]]$cluster)), 
+                             "GRHL" = setNames(replicate(length(unique(enh_all[["GRHL"]]$cluster)), list()),
+                                               unique(enh_all[["GRHL"]]$cluster)))
+dist_clustered_density <- list("CtIP" = setNames(replicate(length(unique(enh_all[["CtIP"]]$cluster)), list()),
+                                               unique(enh_all[["CtIP"]]$cluster)), 
+                             "GRHL" = setNames(replicate(length(unique(enh_all[["GRHL"]]$cluster)), list()),
+                                               unique(enh_all[["GRHL"]]$cluster)))
+
+# Save all distances to be able to plot them together
+all_distances <- list("CtIP" = NA, "GRHL" = NA)
+
+for(marker in names(enh_all)){
+
+  ### Pre/process input data
+  # CtIP/GRHL enhancers
+  marker_enh <- enh_all[[marker]] # select enhancer with 'marker'
+  ### Extend regions of 'win' from summit
+  marker_enh$start <- marker_enh$summit - win
+  marker_enh$end <- marker_enh$summit + win
+  
+  enh_gr <- makeGRangesFromDataFrame(marker_enh, keep.extra.columns = T)
+
+  
+  ### Find SNVs / Enhancers overlaps 
+  # All CtIP & GRHL enhancers - overlap with matching SSMs 
+  hits_obj_enh <- findOverlaps(query=enh_gr, subject=SSMs_gr)
+  SSMs_sbj <- data.frame(SSMs_gr[subjectHits(hits_obj_enh)])
+  colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+  enh_SSMs <- cbind(data.frame(enh_gr[queryHits(hits_obj_enh)]), SSMs_sbj) 
+
+  # Save all distances to be able to plot them together
+  all_distances_marker <- data.frame(matrix(nrow = max(table(enh_SSMs$cluster)), ncol = length(unique(enh_SSMs$cluster))))
+  colnames(all_distances_marker) <- unique(enh_SSMs$cluster)
+  for(cluster in unique(marker_enh$cluster)){
+    enh_SSMs_clust <- enh_SSMs[enh_SSMs$cluster == cluster, ]
+
+    ### Compute dist of SNVs from enhancer summit 
+    dist_enh <- enh_SSMs_clust$start_sbj - enh_SSMs_clust$summit
+    max_lenght <- max(length(dist_enh))
+    dist_all <- data.frame(dist_enh = c(dist_enh, rep(NA, max_lenght - length(dist_enh))))
+    
+    all_distances_marker[, cluster] <- c(dist_all[, "dist_enh"], rep(NA, dim(all_distances_marker)[1] - 
+                                                                       length(dist_all[, "dist_enh"])))
+    
+    ### Plot binned distributions
+    nbins <- c(100)
+    ifelse(marker == "CtIP", color <- "lightblue", color <- "pink")
+    title <- paste("Histogram of distances from peak summit - ", marker, " (Binsize = ", win*2/nbins, "bp)", sep ="")
+    
+    p <- dist_all %>% ggplot(.)+
+      geom_histogram(aes(x = dist_enh), fill = color, alpha = 0.7, bins = nbins[1])+
+      geom_text(data = data.frame(), aes(x=Inf, y=Inf, label= marker), color=color, vjust = 1.5, hjust = 2, 
+                size = 7, fontface = "bold")+
+      theme_light()+
+      scale_x_continuous(breaks = seq(-3000, 3000, 500))+
+      labs(title = NULL, 
+           subtitle = cluster,
+         x = "distance from summit", y = "")
+    dist_clustered_hist[[marker]][[cluster]] <- p
+    #print(p)
+    
+    title <- paste("Density of distances from peak summit - ", marker, sep ="")
+    bw = 100
+    dens_p <- dist_all %>% ggplot(.)+
+      geom_density(aes(x = dist_enh), fill = color, color = color, alpha = 0.7, bw = bw)+
+      geom_text(data = data.frame(), aes(x=Inf, y=Inf, label= marker), color=color, vjust = 1.5, hjust = 2, 
+                size = 7, fontface = "bold")+
+      theme_light()+
+      scale_x_continuous(breaks = seq(-3000, 3000, 500))+
+      labs(title = NULL, 
+           subtitle = cluster,
+         x = "distance from summit", y = "")
+    dist_clustered_density[[marker]][[cluster]] <- dens_p
+    
+    print(dens_p)
+    
+  }
+  
+  all_distances[[marker]] <- all_distances_marker
+  
+  # Save grid of plots 
+  if(save_hist == T){
+    title <- cowplot::ggdraw() + cowplot::draw_label(title, fontface = "bold")
+    cowplot::plot_grid(title, plotlist = dist_clustered_hist[[marker]], ncol = 1) %>%
+    ggsave(., filename = paste(paste(OUT_FOLDER, 
+                       paste("SNVs_distribution", marker, label, "binsize", win*2/nbins[1], "bp", sep="_"), sep=""), ".png", sep=""), 
+        device = "png", width = 7, height = 20)
+  }
+  
+  if(save_density == T){
+    title <- cowplot::ggdraw() + cowplot::draw_label(title, fontface = "bold")
+    cowplot::plot_grid(title, plotlist = dist_clustered_density[[marker]], ncol = 1) %>%
+    ggsave(., filename = paste(paste(OUT_FOLDER, 
+                       paste("SNVs_distribution", marker, label, "density_bandwidth", bw, "win", win, sep="_"), sep=""), ".png", sep=""), 
+        device = "png", width = 7, height = 20)
+  }
+  
+}
+
+
+```
+
+adjust = A multiplicate bandwidth adjustment. Adjust the bandwidth while still using the a bandwidth estimator.
+bw = manually set the bandwidth.
+
+
+
+_High-low clusters_
+# Option 1: High = primi 4; Low = ultimi 3
+clust_high_ctip <- c("CtIP_cluster_2_Enh", "CtIP_cluster_3_Enh", "CtIP_cluster_5_Enh", "CtIP_cluster_6.2_Enh")
+clust_high_grhl <- c("GRHL_cluster_1_Enh", "GRHL_cluster_2_Enh", "GRHL_cluster_4_Enh", "GRHL_cluster_5.2_Enh")
+clust_low_ctip <- c("CtIP_cluster_6.3_Enh", "CtIP_cluster_6.1_Enh", "CtIP_cluster_6.0")
+clust_low_grhl <- c("GRHL_cluster_5.3_Enh", "GRHL_cluster_5.1_Enh", "GRHL_cluster_5.0")
+# Option 2: High = primi 3; Low = ultimi 4
+clust_high_ctip <- c("CtIP_cluster_2_Enh", "CtIP_cluster_3_Enh", "CtIP_cluster_5_Enh")
+clust_high_grhl <- c("GRHL_cluster_1_Enh", "GRHL_cluster_2_Enh", "GRHL_cluster_4_Enh")
+clust_low_ctip <- c("CtIP_cluster_6.2_Enh", "CtIP_cluster_6.3_Enh", "CtIP_cluster_6.1_Enh", "CtIP_cluster_6.0")
+clust_low_grhl <- c("GRHL_cluster_5.2_Enh", "GRHL_cluster_5.3_Enh", "GRHL_cluster_5.1_Enh", "GRHL_cluster_5.0")
+# Option 3: High = primi 5; Low = utlimi 2
+clust_high_ctip <- c("CtIP_cluster_2_Enh", "CtIP_cluster_3_Enh", "CtIP_cluster_5_Enh", "CtIP_cluster_6.2_Enh", "CtIP_cluster_6.3_Enh")
+clust_high_grhl <- c("GRHL_cluster_1_Enh", "GRHL_cluster_2_Enh", "GRHL_cluster_4_Enh", "GRHL_cluster_5.2_Enh", "GRHL_cluster_5.2_Enh")
+clust_low_ctip <- c("CtIP_cluster_6.1_Enh", "CtIP_cluster_6.0")
+clust_low_grhl <- c("GRHL_cluster_5.1_Enh", "GRHL_cluster_5.0")
+```{r}
+# Option 1: High = primi 4; Low = ultimi 3
+clust_high_ctip <- c("CtIP_cluster_2_Enh", "CtIP_cluster_3_Enh", "CtIP_cluster_5_Enh", "CtIP_cluster_6.2_Enh")
+clust_high_grhl <- c("GRHL_cluster_1_Enh", "GRHL_cluster_2_Enh", "GRHL_cluster_4_Enh", "GRHL_cluster_5.2_Enh")
+clust_low_ctip <- c("CtIP_cluster_6.3_Enh", "CtIP_cluster_6.1_Enh", "CtIP_cluster_6.0")
+clust_low_grhl <- c("GRHL_cluster_5.3_Enh", "GRHL_cluster_5.1_Enh", "GRHL_cluster_5.0")
+
+clust_high <- list("CtIP" = clust_high_ctip, "GRHL" = clust_high_grhl)
+clust_low <- list("CtIP" = clust_low_ctip, "GRHL" = clust_low_grhl)
+clust_all <- list("high" = clust_high, "low" = clust_low)
+
+```
+
+```{r}
+label <- "high_low_clusters"
+
+for(marker in names(all_distances)){
+  df <- all_distances[[marker]] 
+  p <-  df %>% pivot_longer(everything(), names_to = "cluster", values_to = "distances") %>%
+  ggplot(data=., aes(x=distances, group=cluster, color = cluster)) +
+    geom_density(bw = 200, alpha = 0.1) +
+    theme_light()
+  print(p)
+}
+
+# Grouping distances based on high-low clusters
+bw <- 100
+for(marker in names(all_distances)){
+  df <- all_distances[[marker]]
+  high <- clust_high[[marker]]
+  low <- clust_low[[marker]]
+  
+  dist_high <- na.omit(unlist(df[, colnames(df) %in% high, ], use.names = F))
+  dist_low <-  na.omit(unlist(df[, colnames(df) %in% low, ], use.names = F))
+  max_dist_length <- max(length(dist_high), length(dist_low))
+  
+  
+  df_grouped <- data.frame("high" = c(dist_high, rep(NA, max_dist_length - length(dist_high))), 
+                           "low" = c(dist_low, rep(NA, max_dist_length - length(dist_low))))
+  
+  # to normalize density plot: geom_density(aes(y = ..scaled..), ...)
+  p1 <- df_grouped %>% pivot_longer(everything(), names_to = "cluster", values_to = "distances") %>%
+  ggplot(., aes(x = distances, group = cluster, color = cluster, fill = cluster))+
+  geom_density(bw = bw, alpha = 0.2)+
+  theme_light()
+  print(p1)
+  
+  p2 <- df_grouped %>% pivot_longer(everything(), names_to = "cluster", values_to = "distances") %>%
+  ggplot(., aes(x = distances, group = cluster, color = cluster))+
+  geom_density(bw = bw, alpha = 0.2, size = 1.5)+
+  theme_light()
+  print(p2)
+  
+  #ggsave(plot=p1, filename = paste(paste(OUT_FOLDER, paste("SNVs_distribution", marker, label, "density_bandwidth", bw, "win", win, sep="_"), sep=""), ".png", sep=""), device = "png", width = 14, height = 7)
+  
+}
+
+
+```
+
+- Kurtoses are basically equal all the time. 
+- Skewness: positive values = right-skewed; negative values = left-skewed; magnitude of skewness = degree of skewness. Anyway, the skewness is also always more or less equal. 
 
 
 ### Distribution of STSMs breakpoint over enhancers regions ###
@@ -298,7 +494,7 @@ for(marker in names(enh_all)){
 save_plots <- FALSE
 
 label <- "clustered_enhancers"
-dist_clustered_plots <- list("CtIP" = setNames(replicate(length(unique(enh_all[["CtIP"]]$cluster)), list()),
+dist_clustered_hist <- list("CtIP" = setNames(replicate(length(unique(enh_all[["CtIP"]]$cluster)), list()),
                                                unique(enh_all[["CtIP"]]$cluster)), 
                              "GRHL" = setNames(replicate(length(unique(enh_all[["GRHL"]]$cluster)), list()),
                                                unique(enh_all[["GRHL"]]$cluster)))
@@ -347,7 +543,7 @@ for(marker in names(enh_all)){
       labs(title = NULL, 
            subtitle = cluster,
          x = "distance from summit", y = "")
-    dist_clustered_plots[[marker]][[cluster]] <- p
+    dist_clustered_hist[[marker]][[cluster]] <- p
     print(p)
     
   }
@@ -355,7 +551,7 @@ for(marker in names(enh_all)){
   # Save grid of plots 
   if(save_plots == T){
     title <- cowplot::ggdraw() + cowplot::draw_label(title, fontface = "bold")
-    cowplot::plot_grid(title, plotlist = dist_clustered_plots[[marker]], ncol = 1) %>%
+    cowplot::plot_grid(title, plotlist = dist_clustered_hist[[marker]], ncol = 1) %>%
     ggsave(., filename = paste(paste(OUT_FOLDER, 
                        paste("STSMs_distribution", marker, label, "binsize", win*2/nbins[1], "bp", sep="_"), sep=""), ".png", sep=""), 
         device = "png", width = 7, height = 18)
@@ -369,4 +565,155 @@ for(marker in names(enh_all)){
 
 
 
+# Density plot
+## STSMs distribution based on clusters ##
+```{r}
+save_hist <- FALSE
+save_density <- FALSE
+
+label <- "clustered_enhancers"
+win <- 3000
+dist_clustered_hist <- list("CtIP" = setNames(replicate(length(unique(enh_all[["CtIP"]]$cluster)), list()),
+                                               unique(enh_all[["CtIP"]]$cluster)), 
+                             "GRHL" = setNames(replicate(length(unique(enh_all[["GRHL"]]$cluster)), list()),
+                                               unique(enh_all[["GRHL"]]$cluster)))
+dist_clustered_density <- list("CtIP" = setNames(replicate(length(unique(enh_all[["CtIP"]]$cluster)), list()),
+                                               unique(enh_all[["CtIP"]]$cluster)), 
+                             "GRHL" = setNames(replicate(length(unique(enh_all[["GRHL"]]$cluster)), list()),
+                                               unique(enh_all[["GRHL"]]$cluster)))
+
+# Save all distances to be able to plot them together
+all_distances <- list("CtIP" = NA, "GRHL" = NA)
+
+for(marker in names(enh_all)){
+
+  ### Pre/process input data
+  # CtIP/GRHL enhancers
+  marker_enh <- enh_all[[marker]] # select enhancer with 'marker'
+  ### Extend regions of 'win' from summit
+  marker_enh$start <- marker_enh$summit - win
+  marker_enh$end <- marker_enh$summit + win
+  
+  enh_gr <- makeGRangesFromDataFrame(marker_enh, keep.extra.columns = T)
+
+  
+  ### Find SNVs / Enhancers overlaps 
+  # All CtIP & GRHL enhancers - overlap with matching SSMs 
+  hits_obj_enh <- findOverlaps(query=enh_gr, subject=STSMs_gr)
+  STSMs_sbj <- data.frame(STSMs_gr[subjectHits(hits_obj_enh)])
+  colnames(STSMs_sbj)[1:5] <- paste(colnames(STSMs_sbj)[1:5], "sbj", sep = "_")
+  enh_SSMs <- cbind(data.frame(enh_gr[queryHits(hits_obj_enh)]), STSMs_sbj) 
+
+  # Save all distances to be able to plot them together
+  all_distances_marker <- data.frame(matrix(nrow = max(table(enh_SSMs$cluster)), ncol = length(unique(enh_SSMs$cluster))))
+  colnames(all_distances_marker) <- unique(enh_SSMs$cluster)
+  for(cluster in unique(marker_enh$cluster)){
+    enh_SSMs_clust <- enh_SSMs[enh_SSMs$cluster == cluster, ]
+
+    ### Compute dist of SNVs from enhancer summit 
+    dist_enh <- enh_SSMs_clust$start_sbj - enh_SSMs_clust$summit
+    max_lenght <- max(length(dist_enh))
+    dist_all <- data.frame(dist_enh = c(dist_enh, rep(NA, max_lenght - length(dist_enh))))
+    
+    all_distances_marker[, cluster] <- c(dist_all[, "dist_enh"], rep(NA, dim(all_distances_marker)[1] - 
+                                                                       length(dist_all[, "dist_enh"])))
+    
+    ### Plot binned distributions
+    nbins <- c(100)
+    ifelse(marker == "CtIP", color <- "lightblue", color <- "pink")
+    title <- paste("Histogram of distances from peak summit - ", marker, " (Binsize = ", win*2/nbins, "bp)", sep ="")
+    
+    p <- dist_all %>% ggplot(.)+
+      geom_histogram(aes(x = dist_enh), fill = color, alpha = 0.7, bins = nbins[1])+
+      geom_text(data = data.frame(), aes(x=Inf, y=Inf, label= marker), color=color, vjust = 1.5, hjust = 2, 
+                size = 7, fontface = "bold")+
+      theme_light()+
+      scale_x_continuous(breaks = seq(-3000, 3000, 500))+
+      labs(title = NULL, 
+           subtitle = cluster,
+         x = "distance from summit", y = "")
+    dist_clustered_hist[[marker]][[cluster]] <- p
+    #print(p)
+    
+    title <- paste("Density of distances from peak summit - ", marker, sep ="")
+    bw = 100
+    dens_p <- dist_all %>% ggplot(.)+
+      geom_density(aes(x = dist_enh), fill = color, color = color, alpha = 0.7, bw = bw)+
+      geom_text(data = data.frame(), aes(x=Inf, y=Inf, label= marker), color=color, vjust = 1.5, hjust = 2, 
+                size = 7, fontface = "bold")+
+      theme_light()+
+      scale_x_continuous(breaks = seq(-3000, 3000, 500))+
+      labs(title = NULL, 
+           subtitle = cluster,
+         x = "distance from summit", y = "")
+    dist_clustered_density[[marker]][[cluster]] <- dens_p
+    
+    print(dens_p)
+    
+  }
+  
+  all_distances[[marker]] <- all_distances_marker
+  
+  # Save grid of plots 
+  if(save_hist == T){
+    title <- cowplot::ggdraw() + cowplot::draw_label(title, fontface = "bold")
+    cowplot::plot_grid(title, plotlist = dist_clustered_hist[[marker]], ncol = 1) %>%
+    ggsave(., filename = paste(paste(OUT_FOLDER, 
+                       paste("STSMs_distribution", marker, label, "binsize", win*2/nbins[1], "bp", sep="_"), sep=""), ".png", sep=""), 
+        device = "png", width = 7, height = 20)
+  }
+  
+  if(save_density == T){
+    title <- cowplot::ggdraw() + cowplot::draw_label(title, fontface = "bold")
+    cowplot::plot_grid(title, plotlist = dist_clustered_density[[marker]], ncol = 1) %>%
+    ggsave(., filename = paste(paste(OUT_FOLDER, 
+          paste("STSMs_distribution", marker, label, "density_bandwidth", bw, "win", win, sep="_"), sep=""), ".png", sep=""),           device = "png", width = 7, height = 20)
+  }
+  
+}
+
+
+```
+
+
+```{r}
+
+for(marker in names(all_distances)){
+  df <- all_distances[[marker]] 
+  p <-  df %>% pivot_longer(everything(), names_to = "cluster", values_to = "distances") %>%
+  ggplot(data=., aes(x=distances, group=cluster, color = cluster)) +
+    geom_density(bw = 200, alpha = 0.1) +
+    theme_light()
+  print(p)
+}
+
+# Grouping distances based on high-low clusters
+for(marker in names(all_distances)){
+  df <- all_distances[[marker]]
+  high <- clust_high[[marker]]
+  low <- clust_low[[marker]]
+  
+  dist_high <- na.omit(unlist(df[, colnames(df) %in% high, ], use.names = F))
+  dist_low <-  na.omit(unlist(df[, colnames(df) %in% low, ], use.names = F))
+  max_dist_length <- max(length(dist_high), length(dist_low))
+  
+  df_grouped <- data.frame("high" = c(dist_high, rep(NA, max_dist_length - length(dist_high))), 
+                           "low" = c(dist_low, rep(NA, max_dist_length - length(dist_low))))
+  
+  p <- df_grouped %>% pivot_longer(everything(), names_to = "cluster", values_to = "distances") %>%
+  ggplot(., aes(x = distances, group = cluster, color = cluster, fill = cluster))+
+  geom_density(bw = 100, alpha = 0.2)+
+  theme_light()
+  print(p)
+  
+  p <- df_grouped %>% pivot_longer(everything(), names_to = "cluster", values_to = "distances") %>%
+  ggplot(., aes(x = distances, group = cluster, color = cluster))+
+  geom_density(bw = 100, alpha = 0.2, size = 1.5)+
+  theme_light()
+  print(p)
+}
+
+
+
+```
 
