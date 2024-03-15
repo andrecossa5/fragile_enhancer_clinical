@@ -63,7 +63,7 @@ generate_random_seqs <- function(seed, n_seqs, win){
 
 compute_stat_enhancers <- function(input_overlaps, source_enhancers_df, classes){
   df_all_stats <- data.frame(matrix(ncol = length(input_overlaps), 
-                                    nrow = dim(source_enhancers_df[[1]])[1]))
+                                    nrow = max(sapply(list(marker_enh_high, marker_enh_low), function(df) dim(df)[1]))))
   colnames(df_all_stats) <- classes
   
   for(i in 1:length(input_overlaps)){
@@ -80,7 +80,8 @@ compute_stat_enhancers <- function(input_overlaps, source_enhancers_df, classes)
                                  "n_donors_hit" = rep(0, length(df_source$name[!df_source$name %in% stat_enh$name]))))
     
     # add to df_all_stats
-    df_all_stats[, i] <- stat_enh$n_donors_hit
+    df_all_stats[, i] <- c(stat_enh$n_donors_hit, 
+                           rep(NA, length(df_all_stats[, i]) - length(stat_enh$n_donors_hit)))
   }
   
   return(df_all_stats)
