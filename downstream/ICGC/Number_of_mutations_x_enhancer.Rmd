@@ -12,6 +12,12 @@ library(ggpubr) # to add p-values to plots
 
 SEED <- 4321
 set.seed(SEED)
+
+source("/Users/ieo6983/Desktop/fragile_enhancer_clinical/utils/functions_genomics.R")
+
+IN_FOLDER <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/"
+OUT_FOLDER_DATA <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/"
+OUT_FOLDER_PLOTS <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/plots/"
 ```
 
 
@@ -45,16 +51,6 @@ compute_stat_enhancers2 <- function(input_overlaps, source_enhancers_df){
   return(df_all_stats)
 }
 
-
-```
-
-
-```{r}
-source("/Users/ieo6983/Desktop/fragile_enhancer_clinical/utils/functions_genomics.R")
-
-IN_FOLDER <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/"
-OUT_FOLDER_DATA <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/"
-OUT_FOLDER_PLOTS <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/plots/"
 
 ```
 
@@ -133,10 +129,10 @@ for(marker in MARKERS){
   stat_enh <- compute_stat_enhancers2(list(enh_SSMs), list(marker_enh)) 
   
   # Number of mutations within each enahncer
-  enh_SSMs$mut_coord_id <- str_c(enh_SSMs$seqnames_sbj, enh_SSMs$start_sbj, enh_SSMs$end_sbj, sep = "_")
+  #enh_SSMs$mut_coord_id <- str_c(enh_SSMs$seqnames_sbj, enh_SSMs$start_sbj, enh_SSMs$end_sbj, sep = "_")
   
   n_muts_enh <- enh_SSMs %>% group_by(name) %>% 
-  dplyr::summarise(n_muts = length(unique(mut_coord_id))) %>%
+  dplyr::summarise(n_muts = n()) %>%
   ungroup() %>%
   dplyr::select(name, n_muts) 
   n_muts_enh <- arrange(n_muts_enh, desc(n_muts_enh$n_muts))
@@ -150,7 +146,7 @@ for(marker in MARKERS){
   print(p)
  
   
-  # Dotplot
+  # Dotplot - add fileds with 0
   for_dot <- left_join(stat_enh, n_muts_enh, by = "name")
   for_dot$n_muts[is.na(for_dot$n_muts)] <- 0
   
@@ -219,7 +215,20 @@ clust_all <- list("high" = clust_high, "low" = clust_low)
 input_variants <- SSMs
 input_variants_gr <- SSMs_gr
 
+
 save_plots <- FALSE
+
+sample_enhancers <- FALSE # If TRUE, sample 'n_enhancers_to_sample' from each cluster (high vs. low)
+n_enhancers_to_sample <- 1500
+
+plot_p_values_random <- FALSE # If TRUE, sample random regions multiple times, compute p-values for each draw and plot distribution
+n_samples <- 1000
+start_seed <- 4321
+pval_dist_ctrl_random <- list("CtIP" = list("high" = c(), "low" = c()), "GRHL" = list("high" = c(), "low" = c()))
+
+plot_p_values_cases <- FALSE
+sample_size <- 1900 # number of enhancers to sample with replacement
+
 max_dim <- max(sapply(enh_all, function(df) dim(df)[1]))
 number_mutations_x_enhancer <- list("CtIP" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
                                                         "low" = rep(NA, max_dim), "low_ctrl" = rep(NA, max_dim)), 
@@ -234,6 +243,11 @@ for(marker in MARKERS){
 
   for(cluster in c("high", "low")){
     marker_enh_clust <- marker_enh[marker_enh$cluster %in% clust_all[[cluster]][[marker]], ]
+    # RANDOM SAMPLING OF ENHANCERS
+    if(sample_enhancers ==T){
+      marker_enh_clust <- marker_enh_clust[sample(x = 1:dim(marker_enh_clust)[1], 
+                                                  size = n_enhancers_to_sample, replace = F),]
+    }
     
     ## Extend regions of 'win' from summit
     marker_enh_clust$start <- marker_enh_clust$summit - WIN
@@ -258,29 +272,46 @@ for(marker in MARKERS){
     colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
     ran_seqs_SSMs <- cbind(data.frame(ran_seqs_gr[queryHits(hits_obj_ran)], SSMs_sbj))
   
+    # Total number of mutations x group (high-low)
+    print(sprintf("Total number of mutations x group - WIN: %d - Marker: %s", WIN, marker))
+    print(paste(cluster, dim(enh_SSMs)[1]))
+    
     # Number of mutations within each enhancer
-    enh_SSMs$mut_coord_id <- str_c(enh_SSMs$seqnames_sbj, enh_SSMs$start_sbj, enh_SSMs$end_sbj, sep = "_")
-    ran_seqs_SSMs$mut_coord_id <- str_c(ran_seqs_SSMs$seqnames_sbj, ran_seqs_SSMs$start_sbj, ran_seqs_SSMs$end_sbj, 
-                                        sep = "_")
-        
     n_muts_enh <- enh_SSMs %>% group_by(name) %>% 
-      dplyr::summarise(n_muts = length(unique(mut_coord_id))) %>%
+      dplyr::summarise(n_muts = n()) %>%
       ungroup() %>%
-      dplyr::select(name, n_muts) 
+      dplyr::select(name, n_muts)
+    
+    # Add enhancers with 0 mutations
+    enh_0_muts <- unique(marker_enh_clust$name[!marker_enh_clust$name %in% n_muts_enh$name])
+    n_muts_enh <- rbind(n_muts_enh, data.frame("name" = enh_0_muts, "n_muts" = 0))
     n_muts_enh <- arrange(n_muts_enh, desc(n_muts_enh$n_muts))
-      
+    
     n_muts_ran <- ran_seqs_SSMs %>% group_by(name) %>% 
-      dplyr::summarise(n_muts = length(unique(mut_coord_id))) %>%
+      dplyr::summarise(n_muts = n()) %>%
       ungroup() %>%
       dplyr::select(name, n_muts) 
+    
+    # Add enhancers with 0 mutations
+    ran_0_muts <- unique(ran_seqs$name[!ran_seqs$name %in% n_muts_ran$name])
+    n_muts_ran <- rbind(n_muts_ran, data.frame("name" = ran_0_muts, "n_muts" = 0))
     n_muts_ran <- arrange(n_muts_ran, desc(n_muts_ran$n_muts))
+
     
     number_mutations_x_enhancer[[marker]][, cluster] <- c(n_muts_enh$n_muts, rep(NA, max_dim-length(n_muts_enh$n_muts)))
     number_mutations_x_enhancer[[marker]][, paste(cluster, "ctrl", sep="_")] <- c(n_muts_ran$n_muts, 
                                                                                   rep(NA, max_dim-length(n_muts_ran$n_muts)))
     
+    if(plot_p_values_random == T){
+      pval_dist_ctrl_random[[marker]][[cluster]] <- compute_pval_dist_ctrl_random(n_samples = n_samples, start_seed = start_seed,
+                            cluster_enh = marker_enh_clust, input_variants_gr = input_variants_gr, n_mutations_case = n_muts_enh)
+      
+    }
+    
   }
 }
+
+
 
 
 ## Plot mutation frequency x enhancer + CTRLs ##
@@ -290,10 +321,10 @@ for(marker in MARKERS){
   mutate(., group = ifelse(startsWith(cluster,"high"), "high", "low"))
   
   print("Average")
-  m_high <- round(mean(df$high, na.rm =T),2)
-  m_high_ctrl <- round(mean(df$high_ctrl, na.rm=T),2)
-  m_low <- round(mean(df$low, na.rm=T),2)
-  m_low_ctrl <- round(mean(df$low_ctrl, na.rm =T),2)
+  m_high <- round(mean(df$high, na.rm =T),3)
+  m_high_ctrl <- round(mean(df$high_ctrl, na.rm=T),3)
+  m_low <- round(mean(df$low, na.rm=T),3)
+  m_low_ctrl <- round(mean(df$low_ctrl, na.rm =T),3)
   print(m_high); print(m_high_ctrl); print(m_low); print(m_low_ctrl)
   
   p <- df_pivot %>% ggplot(., aes(x = cluster, y = n_muts, fill = group))+
@@ -307,10 +338,71 @@ for(marker in MARKERS){
                        comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
   print(p)
   
+  p2 <- df_pivot %>% ggplot(., aes(x = cluster, y = n_muts, fill = group))+
+    geom_violin()+
+    theme_light()+
+    labs(title = paste("Number of mutations x enhancer - ", marker, sep=""),
+        y = "Number of mutations", x = "")+
+    stat_compare_means(method = "wilcox.test", 
+                       label = "p.format", 
+                       size = 3, 
+                       comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
+  print(p2)
+  
   if(save_plots == T){
   ggsave(plot = p, filename = paste(OUT_FOLDER_PLOTS, paste("Number_", mut, "_x_enhancer.", marker, "_high_low_and_controls.png", sep=""), sep=""), device = "png", width = 10, height = 7)
   }
   
+}
+
+
+### PLOT P-VALUES
+## High vs. ctrl / Low vs. ctrl
+if(plot_p_values_random == T){
+for(marker in MARKERS){
+  df_high <- data.frame("x" = pval_dist_ctrl_random[[marker]]$high)
+  df_low <- data.frame("x" = pval_dist_ctrl_random[[marker]]$low)  
+  # Ratio of p-values <= 0.05 over total number of p-values
+  sig_ratio_high <- sum(df_high$x <= 0.05) / length(df_high$x)
+  sig_ratio_low <- sum(df_low$x <= 0.05) / length(df_low$x)
+  
+  hh <- df_high %>%
+    ggplot(., aes(x))+
+    geom_histogram(binwidth = 0.001)+
+    labs(title = sprintf("Ratio of significant p-values: %.2f", round(sig_ratio_high,2)))
+  print(hh)
+  
+  hl <- df_low %>%
+    ggplot(., aes(x))+
+    geom_histogram(binwidth = 0.001)+
+    labs(title = sprintf("Ratio of significant p-values: %.2f", round(sig_ratio_low,2)))
+  print(hl)
+}
+df <- data.frame("CtIP-high" = pval_dist_ctrl_random$CtIP$high, 
+           "CtIP-low" = pval_dist_ctrl_random$CtIP$low, 
+           "GRHL-high" = pval_dist_ctrl_random$GRHL$high, 
+           "GRHL-low" = pval_dist_ctrl_random$GRHL$low)
+#write_tsv(df, file = paste(OUT_FOLDER_DATA, "P_values.N_muts_x_enh.Cases_vs_random.n_sample_1000.tsv"))
+}
+   
+
+# For each group of enhancers (i.e. CtIP-High), X enhancers are samples WITH replacement
+# Enhancers are overlapped with  
+# P-values are computed using wilcoxon test
+if(plot_p_values_cases == T){
+  pval_dist_cases <- compute_pval_dist_cases(n_samples = n_samples, start_seed = start_seed, 
+                                             sample_size = sample_size, df_vars = number_mutations_x_enhancer)
+}
+## High vs. Low
+for(marker in MARKERS){
+  r_m <- round(sum(pval_dist_cases[[marker]] <= 0.05) / length(pval_dist_cases[[marker]]),2)
+
+  p <- data.frame(x = pval_dist_cases[[marker]]) %>%
+    ggplot(., aes(x))+
+    geom_histogram()+
+    geom_vline(xintercept = 0.05, color = "red")+
+    labs(title = sprintf("Ratio of significant p-values: %.2f", r_m))
+  print(p)
 }
 
 ```
@@ -320,7 +412,7 @@ for(marker in MARKERS){
 ```{r}
 start_time <- Sys.time()
 
-n_samples <- 1000
+n_samples <- 100
 start_seed <- 4321
 number_of_mutations_x_random <- list("CtIP" = data.frame("avg_high" = rep(NA, n_samples), "avg_low" = rep(NA, n_samples)), 
                                      "GRHL" = data.frame("avg_high" = rep(NA, n_samples), "avg_low" = rep(NA, n_samples)))
@@ -348,6 +440,7 @@ if(random_sampling == T){
           ran_seqs_SSMs <- cbind(data.frame(ran_seqs_gr[queryHits(hits_obj_ran)], SSMs_sbj))
                 
           ran_seqs_SSMs$mut_coord_id <- str_c(ran_seqs_SSMs$seqnames_sbj, ran_seqs_SSMs$start_sbj, ran_seqs_SSMs$end_sbj, sep = "_")
+          
           n_muts_ran <- ran_seqs_SSMs %>% group_by(name) %>% 
             dplyr::summarise(n_muts = length(unique(mut_coord_id))) %>%
             ungroup() %>%
@@ -368,48 +461,8 @@ if(random_sampling == T){
 
 end_time <- Sys.time()
 print(end_time - start_time)
-```
-
-```{r}
-number_of_mutations_x_random.1000 <- number_of_mutations_x_random
-#write_tsv(number_of_mutations_x_random.1000[["CtIP"]], paste(OUT_FOLDER_DATA, paste("Avg_number_of_mutations.1000_random_samples.CtIP_high_low_clusters_option1.tsv"), sep =""))
-#write_tsv(number_of_mutations_x_random.1000[["GRHL"]], paste(OUT_FOLDER_DATA, paste("Avg_number_of_mutations.1000_random_samples.GRHL_high_low_clusters_option1.tsv"), sep =""))
 
 ```
-
-```{r}
-# Option 1
-number_of_mutations_x_random.1000.ctip <- read_tsv(paste(OUT_FOLDER_DATA, "Avg_number_of_mutations.1000_random_samples.CtIP_high_low_clusters_option1.tsv", sep=""))
-number_of_mutations_x_random.1000.grhl <- read_tsv(paste(OUT_FOLDER_DATA, "Avg_number_of_mutations.1000_random_samples.GRHL_high_low_clusters_option1.tsv", sep=""))
-
-number_of_mutations_x_random.1000 <- list("CtIP" = number_of_mutations_x_random.1000.ctip, 
-                                          "GRHL" = number_of_mutations_x_random.1000.grhl)
-
-
-for(marker in MARKERS){
-  for(cluster in c("avg_high", "avg_low")){
-    # Compute average number of mutations within enhancers for each groups of interest ('case')
-    group <- str_sub(cluster, start = 5L)
-    case_counts <- number_mutations_x_enhancer[[marker]][, group]
-    case_avg <- round(mean(case_counts, na.rm = T),3) 
-    
-    ph <- number_of_mutations_x_random.1000[[marker]] %>% 
-      ggplot(., aes(x = .[[cluster]]))+
-      geom_vline(xintercept = case_avg, color = "red", show.legend = T)+
-      annotate("text", x = case_avg+0.021, y = 90, label = paste("Average","\n", "within enhancers"), color = "red")+
-      geom_histogram()+
-      labs(title = sprintf("Average number of mutations within random regions - %d draws", n_samples), 
-           subtitle = sprintf("Marker: %s Cluster: %s", marker, group),
-           x = "Average n. of mutations")+
-      theme_light()
-    print(ph)
-    
-  }
-}
-
-
-```
-
 
 
 
@@ -434,6 +487,10 @@ for(marker in MARKERS){
 
   for(cluster in c("high", "low")){
     marker_enh_clust <- marker_enh[marker_enh$cluster %in% clust_all[[cluster]][[marker]], ]
+    if(sample_enhancers == T){
+      marker_enh_clust <- marker_enh_clust[sample(x = 1:dim(marker_enh_clust)[1], 
+                                           size = n_enhancers_to_sample, replace = F),]
+    }
     
     ## Extend regions of 'win' from summit
     marker_enh_clust$start <- marker_enh_clust$summit - WIN
@@ -458,14 +515,22 @@ for(marker in MARKERS){
     colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
     ran_seqs_SSMs <- cbind(data.frame(ran_seqs_gr[queryHits(hits_obj_ran)], SSMs_sbj))
   
-
+    # Total number of donors mutated x group (high-low)
+    print(sprintf("Total number of donors mutated x group - WIN: %d - Marker: %s", WIN, marker))
+    print(paste(cluster, length(unique(enh_SSMs$icgc_donor_id))))
+    
     # Number of donors mutated x enhancer
     n_don_enh <- enh_SSMs %>% dplyr::group_by(name) %>%
       dplyr::summarise(., n_donors_hit = length(unique(icgc_donor_id)))
     n_don_ran <- ran_seqs_SSMs %>% dplyr::group_by(name) %>%
       dplyr::summarise(., n_donors_hit = length(unique(icgc_donor_id)))
     
-    
+    # Add enhancers mutated in 0 donors 
+    enh_0_don <- unique(marker_enh_clust$name[!marker_enh_clust$name %in% n_don_enh$name])
+    n_don_enh <- rbind(n_don_enh, data.frame("name" = enh_0_don, "n_donors_hit" = 0))
+    ran_0_don <- unique(ran_seqs$name[!ran_seqs$name %in% n_don_ran$name])
+    n_don_ran <- rbind(n_don_ran, data.frame("name" = ran_0_don, "n_donors_hit" = 0))
+            
     number_donors_x_enhancer[[marker]][, cluster] <- c(n_don_enh$n_donors_hit, rep(NA, max_dim-length(n_don_enh$n_donors_hit)))
     number_donors_x_enhancer[[marker]][, paste(cluster, "ctrl", sep="_")] <- c(n_don_ran$n_donors_hit, 
                                                                             rep(NA, max_dim-length(n_don_ran$n_donors_hit)))
@@ -482,10 +547,10 @@ for(marker in MARKERS){
   mutate(., group = ifelse(startsWith(cluster,"high"), "high", "low"))
   
   print("Average")
-  m_high <- round(mean(df$high, na.rm =T),2)
-  m_high_ctrl <- round(mean(df$high_ctrl, na.rm=T),2)
-  m_low <- round(mean(df$low, na.rm=T),2)
-  m_low_ctrl <- round(mean(df$low_ctrl, na.rm =T),2)
+  m_high <- round(mean(df$high, na.rm =T),3)
+  m_high_ctrl <- round(mean(df$high_ctrl, na.rm=T),3)
+  m_low <- round(mean(df$low, na.rm=T),3)
+  m_low_ctrl <- round(mean(df$low_ctrl, na.rm =T),3)
   print(m_high); print(m_high_ctrl); print(m_low); print(m_low_ctrl)
   
   p <- df_pivot %>% ggplot(., aes(x = cluster, y = n, fill = group))+
@@ -500,9 +565,39 @@ for(marker in MARKERS){
                        comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
   print(p)
   
+  p2 <- df_pivot %>% ggplot(., aes(x = cluster, y = n, fill = group))+
+    geom_violin()+
+    theme_light()+
+    labs(title = paste("Number of donors mutates x enhancer - ", marker, sep=""),
+        y = "Number of donors", x = "")+
+    scale_fill_manual(values = c("darkviolet", "darkolivegreen3"))+
+    stat_compare_means(method = "wilcox.test", 
+                       label = "p.format", 
+                       size = 3, 
+                       comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
+  print(p2)
+  
   if(save_plots == T){
   ggsave(plot = p, filename = paste(OUT_FOLDER_PLOTS, paste("Number_donors_x_enhancer.", mut, "_", marker, "_high_low_and_controls.png", sep=""), sep=""), device = "png", width = 10, height = 7)
   }
+}
+
+
+## High vs. Low
+if(plot_p_values_cases == T){
+  pval_dist_cases <- compute_pval_dist_cases(n_samples = n_samples, start_seed = start_seed, 
+                                             sample_size = sample_size, df_vars = number_donors_x_enhancer)
+}
+
+for(marker in MARKERS){
+  r_m <- round(sum(pval_dist_cases[[marker]] <= 0.05) / length(pval_dist_cases[[marker]]),2)
+
+  p <- data.frame(x = pval_dist_cases[[marker]]) %>%
+    ggplot(., aes(x))+
+    geom_histogram()+
+    geom_vline(xintercept = 0.05, color = "red")+
+    labs(title = sprintf("Ratio of significant p-values: %.2f", r_m))
+  print(p)
 }
 
 ```
@@ -517,7 +612,7 @@ input_variants <- SSMs
 input_variants_gr <- SSMs_gr
 
 save_plots <- FALSE
-max_dim <- max(sapply(enh_all, function(df) dim(df)[1]))
+max_dim <- length(unique(SSMs$icgc_donor_id))
 number_enhancers_x_donor <- list("CtIP" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
                                                      "low" = rep(NA, max_dim), "low_ctrl" = rep(NA, max_dim)), 
                                   "GRHL" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
@@ -531,6 +626,10 @@ for(marker in MARKERS){
 
   for(cluster in c("high", "low")){
     marker_enh_clust <- marker_enh[marker_enh$cluster %in% clust_all[[cluster]][[marker]], ]
+    if(sample_enhancers == T){
+      marker_enh_clust <- marker_enh_clust[sample(x = 1:dim(marker_enh_clust)[1], 
+                                           size = n_enhancers_to_sample, replace = F),]
+    }
     
     ## Extend regions of 'win' from summit
     marker_enh_clust$start <- marker_enh_clust$summit - WIN
@@ -554,6 +653,10 @@ for(marker in MARKERS){
     SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_ran)])
     colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
     ran_seqs_SSMs <- cbind(data.frame(ran_seqs_gr[queryHits(hits_obj_ran)], SSMs_sbj))
+    
+    # Total number of enhancers mutated x group (high-low)
+    print(sprintf("Total number of enhancers mutated x group - WIN: %d - Marker: %s", WIN, marker))
+    print(paste(cluster, length(unique(enh_SSMs$name))))
   
 
     # Number of enhancers mutated x enhancer
@@ -561,6 +664,12 @@ for(marker in MARKERS){
       dplyr::summarise(., n_enh_hit = length(unique(name)))
     n_ran_mut <- ran_seqs_SSMs %>% dplyr::group_by(icgc_donor_id) %>%
       dplyr::summarise(., n_ran_hit = length(unique(name)))
+    
+    # Add donors with 0 enhancers mutated
+    don_0_enh <- unique(SSMs$icgc_donor_id[!SSMs$icgc_donor_id %in% n_enh_mut$icgc_donor_id])
+    n_enh_mut <- rbind(n_enh_mut, data.frame("icgc_donor_id" = don_0_enh, "n_enh_hit" = 0))
+    don_0_ran <- unique(SSMs$icgc_donor_id[!SSMs$icgc_donor_id %in% n_ran_mut$icgc_donor_id])
+    n_ran_mut <- rbind(n_ran_mut, data.frame("icgc_donor_id" = don_0_ran, "n_ran_hit" = 0))
     
     
     number_enhancers_x_donor[[marker]][, cluster] <- c(n_enh_mut$n_enh_hit, rep(NA, max_dim-length(n_enh_mut$n_enh_hit)))
@@ -571,34 +680,63 @@ for(marker in MARKERS){
 }
 
 
-
+perc <- FALSE
 ## Plot number of enhancers mutated x donor + CTRLs ##
 for(marker in MARKERS){
   df <- number_enhancers_x_donor[[marker]] 
+  
+  sample_size_clust <- list("high" = NA, "low" = NA)
+  for(cluster in c("high", "low")){
+    enh_marker <- enh_all[[marker]]
+    sample_size_clust[[cluster]] <- dim(na.omit(enh_marker[enh_marker$cluster %in% clust_all[[cluster]][[marker]], ]))[1]
+  }
+  
+  y_axis_label <- "Number of enhancers"
+  if(perc == T){
+    df[, 1] <- df[, 1] / sample_size_clust[["high"]] * 100
+    df[, 2] <- df[, 2] / sample_size_clust[["high"]] * 100
+    df[, 3] <- df[, 3] / sample_size_clust[["low"]] * 100
+    df[, 4] <- df[, 4] / sample_size_clust[["low"]] * 100
+    
+    y_axis_label <- "Percentage of enhancers"
+  }
+  
   df_pivot <- df %>% pivot_longer(everything(), names_to="cluster", values_to="n") %>%
   mutate(., group = ifelse(startsWith(cluster,"high"), "high", "low"))
   
   print("Average")
-  m_high <- round(mean(df$high, na.rm =T),2)
-  m_high_ctrl <- round(mean(df$high_ctrl, na.rm=T),2)
-  m_low <- round(mean(df$low, na.rm=T),2)
-  m_low_ctrl <- round(mean(df$low_ctrl, na.rm =T),2)
+  m_high <- round(mean(df$high, na.rm =T),3)
+  m_high_ctrl <- round(mean(df$high_ctrl, na.rm=T),3)
+  m_low <- round(mean(df$low, na.rm=T),3)
+  m_low_ctrl <- round(mean(df$low_ctrl, na.rm =T),3)
   print(m_high); print(m_high_ctrl); print(m_low); print(m_low_ctrl)
   
   scale_log <- TRUE
   p <- df_pivot %>% ggplot(., aes(x = cluster, y = n, fill = group))+
     geom_boxplot()+
     theme_light()+
-    labs(title = paste("Number of enhancers mutated x donor - ", marker, sep=""),
-        y = "Number of enhancers", x = "")+
+    labs(title = paste("Enhancers mutated x donor - ", marker, sep=""),
+        y = y_axis_label, x = "")+
     scale_fill_manual(values = c("brown3", "deepskyblue3"))+
     stat_compare_means(method = "wilcox.test", 
                        label = "p.format", 
                        size = 3, 
                        comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
-  if(scale_log == TRUE){p <- p + scale_y_log10()}
-  
+  if(scale_log == TRUE){p <- p + scale_y_log10()+labs(y = "log10(Number of enhancers)")}
   print(p)
+  
+  p2 <- df_pivot %>% ggplot(., aes(x = cluster, y = n, fill = group))+
+    geom_violin()+
+    theme_light()+
+    labs(title = paste("Percentage of enhancers mutated x donor - ", marker, sep=""),
+        y = y_axis_label, x = "")+
+    scale_fill_manual(values = c("brown3", "deepskyblue3"))+
+    stat_compare_means(method = "wilcox.test", 
+                       label = "p.format", 
+                       size = 3, 
+                       comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
+  if(scale_log == TRUE & perc == T){p <- p + scale_y_log10()+labs(y = "log10(Number of enhancers)")}
+  print(p2)
   
   if(save_plots == T){
   ggsave(plot = p, filename = paste(OUT_FOLDER_PLOTS, paste("Number_enhancers_x_donor.", mut, "_", marker, "_high_low_and_controls.png", sep=""), sep=""), device = "png", width = 10, height = 7)
@@ -606,8 +744,23 @@ for(marker in MARKERS){
 
 }
 
-```
+## High vs. Low
+if(plot_p_values_cases == T){
+  pval_dist_cases <- compute_pval_dist_cases(n_samples = n_samples, start_seed = start_seed, 
+                                             sample_size = sample_size, df_vars = number_enhancers_x_donor)
+}
 
+for(marker in MARKERS){
+  r_m <- round(sum(pval_dist_cases[[marker]] <= 0.05) / length(pval_dist_cases[[marker]]),2)
+
+  p <- data.frame(x = pval_dist_cases[[marker]]) %>%
+    ggplot(., aes(x))+
+    geom_histogram()+
+    geom_vline(xintercept = 0.05, color = "red")+
+    labs(title = sprintf("Ratio of significant p-values: %.2f", r_m))
+  print(p)
+}
+```
 
 
 
@@ -667,7 +820,7 @@ for(marker in MARKERS){
   enh_SSMs$mut_coord_id <- str_c(enh_SSMs$seqnames_sbj, enh_SSMs$start_sbj, enh_SSMs$end_sbj, sep = "_")
   
   n_muts_enh <- enh_SSMs %>% group_by(name) %>% 
-  dplyr::summarise(n_muts = length(unique(mut_coord_id))) %>%
+  dplyr::summarise(n_muts = n()) %>%
   ungroup() %>%
   dplyr::select(name, n_muts) 
   n_muts_enh <- arrange(n_muts_enh, desc(n_muts_enh$n_muts))
@@ -706,7 +859,6 @@ for(marker in MARKERS){
 ```
 
 
-
 ### Number of mutations x enhancers ###
 Boxplots with controls (CtIP-high, CtIP-low, random seqs)
 ```{r}
@@ -725,6 +877,14 @@ clust_all <- list("high" = clust_high, "low" = clust_low)
 input_variants <- STSMs
 input_variants_gr <- STSMs_gr
   
+sample_enhancers <- TRUE # If TRUE, sample 'n_enhancers_to_sample' from each cluster (high vs. low)
+n_enhancers_to_sample <- 1500
+
+plot_p_values_cases <- TRUE
+sample_size <- 1900 # number of enhancers to sample with replacement
+n_samples <- 1000
+start_seed <- 4321
+
 max_dim <- max(sapply(enh_all, function(df) dim(df)[1]))
 number_mutations_x_enhancer <- list("CtIP" = data.frame("high" = rep(NA, max_dim), "high_ctrl" = rep(NA, max_dim), 
                                                         "low" = rep(NA, max_dim), "low_ctrl" = rep(NA, max_dim)), 
@@ -739,6 +899,10 @@ for(marker in MARKERS){
 
   for(cluster in c("high", "low")){
     marker_enh_clust <- marker_enh[marker_enh$cluster %in% clust_all[[cluster]][[marker]], ]
+    if(sample_enhancers == T){
+      marker_enh_clust <- marker_enh_clust[sample(x = 1:dim(marker_enh_clust)[1], 
+                                           size = n_enhancers_to_sample, replace = F),]
+    }
     
     ## Extend regions of 'win' from summit
     marker_enh_clust$start <- marker_enh_clust$summit - WIN
@@ -762,22 +926,31 @@ for(marker in MARKERS){
     SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_ran)])
     colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
     ran_seqs_SSMs <- cbind(data.frame(ran_seqs_gr[queryHits(hits_obj_ran)], SSMs_sbj))
+    
+    # Total number of enhancers mutated x group (high-low)
+    print(sprintf("Total number of enhancers mutated x group - WIN: %d - Marker: %s", WIN, marker))
+    print(paste(cluster, length(unique(enh_SSMs$name))))
   
     # Number of mutations within each enahncer
-    enh_SSMs$mut_coord_id <- str_c(enh_SSMs$seqnames_sbj, enh_SSMs$start_sbj, enh_SSMs$end_sbj, sep = "_")
-    ran_seqs_SSMs$mut_coord_id <- str_c(ran_seqs_SSMs$seqnames_sbj, ran_seqs_SSMs$start_sbj, ran_seqs_SSMs$end_sbj, 
-                                        sep = "_")
-        
     n_muts_enh <- enh_SSMs %>% group_by(name) %>% 
-      dplyr::summarise(n_muts = length(unique(mut_coord_id))) %>%
+      dplyr::summarise(n_muts = n()) %>%
       ungroup() %>%
       dplyr::select(name, n_muts) 
-    n_muts_enh <- arrange(n_muts_enh, desc(n_muts_enh$n_muts))
-      
+
     n_muts_ran <- ran_seqs_SSMs %>% group_by(name) %>% 
-      dplyr::summarise(n_muts = length(unique(mut_coord_id))) %>%
+      dplyr::summarise(n_muts = n()) %>%
       ungroup() %>%
       dplyr::select(name, n_muts) 
+    n_muts_ran <- arrange(n_muts_ran, desc(n_muts_ran$n_muts))
+    
+    # Add enhancers with 0 mutations
+    enh_0_muts <- unique(marker_enh_clust$name[!marker_enh_clust$name %in% n_muts_enh$name])
+    n_muts_enh <- rbind(n_muts_enh, data.frame("name" = enh_0_muts, "n_muts" = 0))
+    n_muts_enh <- arrange(n_muts_enh, desc(n_muts_enh$n_muts))
+    
+    # Add enhancers with 0 mutations
+    ran_0_muts <- unique(ran_seqs$name[!ran_seqs$name %in% n_muts_ran$name])
+    n_muts_ran <- rbind(n_muts_ran, data.frame("name" = ran_0_muts, "n_muts" = 0))
     n_muts_ran <- arrange(n_muts_ran, desc(n_muts_ran$n_muts))
     
     number_mutations_x_enhancer[[marker]][, cluster] <- c(n_muts_enh$n_muts, rep(NA, max_dim-length(n_muts_enh$n_muts)))
@@ -795,6 +968,12 @@ for(marker in MARKERS){
   df_pivot <- df %>% pivot_longer(everything(), names_to="cluster", values_to="n_muts") %>%
   mutate(., group = ifelse(startsWith(cluster,"high"), "high", "low"))
   
+  print("Average")
+  m_high <- round(mean(df$high, na.rm =T),3)
+  m_high_ctrl <- round(mean(df$high_ctrl, na.rm=T),3)
+  m_low <- round(mean(df$low, na.rm=T),3)
+  m_low_ctrl <- round(mean(df$low_ctrl, na.rm =T),3)
+  print(m_high); print(m_high_ctrl); print(m_low); print(m_low_ctrl)
   
   p <- df_pivot %>% ggplot(., aes(x = cluster, y = n_muts, fill = group))+
     geom_boxplot()+
@@ -806,8 +985,37 @@ for(marker in MARKERS){
                        size = 3, 
                        comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
   print(p)
+  
+  p2 <- df_pivot %>% ggplot(., aes(x = cluster, y = n_muts, fill = group))+
+    geom_violin()+
+    theme_light()+
+    labs(title = paste("Number of mutations x enhancer - ", marker, sep=""),
+        y = "Number of mutations", x = "")+
+    stat_compare_means(method = "wilcox.test", 
+                       label = "p.format", 
+                       size = 3, 
+                       comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
+  print(p2)
 }
 
+
+
+### P-values distribution
+if(plot_p_values_cases == T){
+  pval_dist_cases <- compute_pval_dist_cases(n_samples = n_samples, start_seed = start_seed, 
+                                             sample_size = sample_size, df_vars = number_mutations_x_enhancer)
+}
+
+for(marker in MARKERS){
+  r_m <- round(sum(pval_dist_cases[[marker]] <= 0.05) / length(pval_dist_cases[[marker]]),2)
+
+  p <- data.frame(x = pval_dist_cases[[marker]]) %>%
+    ggplot(., aes(x))+
+    geom_histogram()+
+    geom_vline(xintercept = 0.05, color = "red")+
+    labs(title = sprintf("Ratio of significant p-values: %.2f", r_m))
+  print(p)
+}
 
 ```
 
@@ -836,6 +1044,10 @@ for(marker in MARKERS){
 
   for(cluster in c("high", "low")){
     marker_enh_clust <- marker_enh[marker_enh$cluster %in% clust_all[[cluster]][[marker]], ]
+    if(sample_enhancers == T){
+      marker_enh_clust <- marker_enh_clust[sample(x = 1:dim(marker_enh_clust)[1], 
+                                           size = n_enhancers_to_sample, replace = F),]
+    }
     
     ## Extend regions of 'win' from summit
     marker_enh_clust$start <- marker_enh_clust$summit - WIN
@@ -867,6 +1079,11 @@ for(marker in MARKERS){
     n_don_ran <- ran_seqs_SSMs %>% dplyr::group_by(name) %>%
       dplyr::summarise(., n_donors_hit = length(unique(icgc_donor_id)))
     
+    # Add enhancers mutated in 0 donors 
+    enh_0_don <- unique(marker_enh_clust$name[!marker_enh_clust$name %in% n_don_enh$name])
+    n_don_enh <- rbind(n_don_enh, data.frame("name" = enh_0_don, "n_donors_hit" = 0))
+    ran_0_don <- unique(ran_seqs$name[!ran_seqs$name %in% n_don_ran$name])
+    n_don_ran <- rbind(n_don_ran, data.frame("name" = ran_0_don, "n_donors_hit" = 0))
     
     ##REMOVE##
     number_donors_x_enhancer[[marker]][, cluster] <- c(n_don_enh$n_donors_hit, 
@@ -897,6 +1114,18 @@ for(marker in MARKERS){
                        size = 3, 
                        comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
   print(p)
+  
+  p2 <- df_pivot %>% ggplot(., aes(x = cluster, y = n, fill = group))+
+    geom_violin()+
+    theme_light()+
+    labs(title = paste("Number of donors mutates x enhancer - ", marker, sep=""),
+        y = "Number of donors", x = "")+
+    scale_fill_manual(values = c("darkviolet", "darkolivegreen3"))+
+    stat_compare_means(method = "wilcox.test", 
+                       label = "p.format", 
+                       size = 3, 
+                       comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
+  print(p2)
 }
 
 ```
@@ -925,6 +1154,10 @@ for(marker in MARKERS){
 
   for(cluster in c("high", "low")){
     marker_enh_clust <- marker_enh[marker_enh$cluster %in% clust_all[[cluster]][[marker]], ]
+    if(sample_enhancers == T){
+      marker_enh_clust <- marker_enh_clust[sample(x = 1:dim(marker_enh_clust)[1], 
+                                           size = n_enhancers_to_sample, replace = F),]
+    }
     
     ## Extend regions of 'win' from summit
     marker_enh_clust$start <- marker_enh_clust$summit - WIN
@@ -956,6 +1189,12 @@ for(marker in MARKERS){
     n_ran_mut <- ran_seqs_SSMs %>% dplyr::group_by(icgc_donor_id) %>%
       dplyr::summarise(., n_ran_hit = length(unique(name)))
     
+    # Add donors with 0 enhancers mutated
+    don_0_enh <- unique(SSMs$icgc_donor_id[!SSMs$icgc_donor_id %in% n_enh_mut$icgc_donor_id])
+    n_enh_mut <- rbind(n_enh_mut, data.frame("icgc_donor_id" = don_0_enh, "n_enh_hit" = 0))
+    don_0_ran <- unique(SSMs$icgc_donor_id[!SSMs$icgc_donor_id %in% n_ran_mut$icgc_donor_id])
+    n_ran_mut <- rbind(n_ran_mut, data.frame("icgc_donor_id" = don_0_ran, "n_ran_hit" = 0))
+    
     
     ##REMOVE##
     number_enhancers_x_donor[[marker]][, cluster] <- c(n_enh_mut$n_enh_hit, 
@@ -985,7 +1224,21 @@ for(marker in MARKERS){
                        size = 3, 
                        comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
   print(p)
+  
+  p2 <- df_pivot %>% ggplot(., aes(x = cluster, y = n, fill = group))+
+    geom_violin()+
+    theme_light()+
+    labs(title = paste("Number of enhancers mutated x donor - ", marker, sep=""),
+        y = "Number of enhancers", x = "")+
+    scale_fill_manual(values = c("brown3", "deepskyblue3"))+
+    stat_compare_means(method = "wilcox.test", 
+                       label = "p.format", 
+                       size = 3, 
+                       comparisons = list(c("high", "high_ctrl"), c("low", "low_ctrl"), c("high", "low")))
+  print(p2)
 }
 
 ```
+
+
 

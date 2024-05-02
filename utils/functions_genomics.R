@@ -62,8 +62,9 @@ generate_random_seqs <- function(seed, n_seqs, win){
 # classes = vector containing classes of enhancers/sequences overlapped
 
 compute_stat_enhancers <- function(input_overlaps, source_enhancers_df, classes){
-  df_all_stats <- data.frame(matrix(ncol = length(input_overlaps), 
+  df_all_stats <- data.frame(matrix(ncol = length(input_overlaps), # Bottom line will give error sapply(list(source_enhancers_df)) ??
                                     nrow = max(sapply(list(marker_enh_high, marker_enh_low), function(df) dim(df)[1]))))
+  
   colnames(df_all_stats) <- classes
   
   for(i in 1:length(input_overlaps)){
@@ -118,4 +119,84 @@ compute_stat_donors <- function(input_overlaps, source_donors_df, classes){
   
   return(df_all_stats)
 }
+
+
+
+### Compute P-values distribution for case-control comparison ###
+# n_samples = numero di mutliple samplings
+# start_seed = starting seed. For each i in n_samples draws, start_seed+i will be used to sample
+# cluster_enh = a dataframe containing the group of enhancers, belonging to a certain cluster, representing the 'case' group. 
+  # the dim()[1] of the dataframe is used to sample the right number of random sequences.
+# input_variants_gr = GRanges object with sequences of the variants of interest, for which overlaps with random regions will be searched.
+# n_mutations_case = number of mutations already found for the 'case' group of enahncers, to be compared with each random sample of random regions
+# (should generalize this one to be able to use different variables, not only n_muts)
+
+compute_pval_dist_ctrl_random <- function(n_samples = 1000, start_seed = 4321, 
+                                          cluster_enh, input_variants_gr, 
+                                          n_mutations_case){
+  # i.e. cluster = marker_enh_clust
+  p_val_dist <- c()
+  
+  for(i in 1:n_samples){
+    ran_seqs <- generate_random_seqs(seed=start_seed+i, n_seqs=dim(cluster_enh)[1], win = WIN)
+    ran_seqs_gr = makeGRangesFromDataFrame(ran_seqs, keep.extra.columns = T)
+    
+    # Random
+    hits_obj_ran <- findOverlaps(query=ran_seqs_gr, subject=input_variants_gr)
+    SSMs_sbj <- data.frame(input_variants_gr[subjectHits(hits_obj_ran)])
+    colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+    ran_seqs_SSMs <- cbind(data.frame(ran_seqs_gr[queryHits(hits_obj_ran)], SSMs_sbj))
+    
+    # Count number of mutations overlapping with each random seq
+    n_muts_ran <- ran_seqs_SSMs %>% group_by(name) %>% 
+      dplyr::summarise(n_muts = n()) %>%
+      ungroup() %>%
+      dplyr::select(name, n_muts) 
+    # Add enhancers with 0 mutations
+    ran_0_muts <- unique(ran_seqs$name[!ran_seqs$name %in% n_muts_ran$name])
+    n_muts_ran <- rbind(n_muts_ran, data.frame("name" = ran_0_muts, "n_muts" = 0))
+    n_muts_ran <- arrange(n_muts_ran, desc(n_muts_ran$n_muts))
+    
+    p_val <- round(wilcox.test(n_mutations_case$n_muts, n_muts_ran$n_muts)$p.value,3)
+    p_val_dist <- c(p_val_dist, p_val)
+    
+  }
+  
+  return(p_val_dist)
+}
+
+
+
+
+### P-VALUES CASES ###
+compute_pval_dist_cases <- function(n_samples = 1000, start_seed = 4321, 
+                                   sample_size = 1900, # number of enhancers to resample from each group
+                                   df_vars){ # dataframe with variable to compare for each group, i.e. 'n_muts
+  p_val_dist <- list()
+  for(marker in MARKERS){
+    p_val_dist[[marker]] <- c()
+    
+    for(i in 1:n_samples){
+      set.seed(start_seed+i)
+      
+      # Extract variable of interest for each group
+      var_high <- na.omit(df_vars[[marker]] %>% dplyr::select("high"))
+      var_low <- na.omit(df_vars[[marker]] %>% dplyr::select("low"))
+      
+      # Sample X observations with replacement 
+      sample_high <- sample(x = 1:dim(var_high)[1], size = sample_size, replace = T)
+      sample_high <- var_high[sample_high, ]
+      sample_low <- sample(x = 1:dim(var_low)[1], size = sample_size, replace = T)
+      sample_low <- var_low[sample_low, ]
+      
+      # Compute significance of difference in 'var' (i.e. number of mutations) among the 2 groups      
+      p_val <- round(wilcox.test(sample_high, sample_low)$p.value,3)
+      p_val_dist[[marker]] <- c(p_val_dist[[marker]], p_val)
+    } 
+  }
+  
+  # Return df with p-values for high-low comparison, for each marker 
+  return(p_val_dist)
+} 
+
 
