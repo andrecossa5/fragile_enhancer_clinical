@@ -109,7 +109,7 @@ for label in clusters.keys():
 # Extract activity values for each signature
 top_n = 5
 for label in clusters.keys():
-    dir_results_signatures_activities = path_to_file+"SNVs_GRHL_{}/SigProfilerAssignment_output/Assignment_Solution/Activities/".format(label) 
+    dir_results_signatures_activities = OUT_FOLDER+"SNVs_GRHL_{}/SigProfilerAssignment_output/Assignment_Solution/Activities/".format(label) 
 
     SBS_freqs_grhl = pd.read_csv(dir_results_signatures_activities+"Assignment_Solution_Activities.txt", 
                              sep = "\t", index_col='Samples')
