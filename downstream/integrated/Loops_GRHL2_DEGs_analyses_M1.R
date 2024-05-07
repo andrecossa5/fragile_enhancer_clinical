@@ -5,10 +5,10 @@ library(GenomicRanges)
 library(viridis)
 library(gridExtra)
 
-source("./Desktop/enhancers_project/Analyses/loops/loops_functions.R")
+source("/Users/ieo6983/Desktop/enhancers_project/Analyses/loops/loops_functions.R")
 
 ### Hi-ChIP Loops ###
-kb <- 2
+kb <- 4
 
 path_main <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical"
 path_data <- fs::path(path_main, "data") 
@@ -193,7 +193,7 @@ for(cond in c("scr", "kd")){
 }
 
 # DEGs involved in loops
-DEGs <- read_tsv("./Desktop/expression/DEGs/Df_DEGs.df_LFC_sig.padj_0.05.log2FC_1.Up_and_Down.tsv")
+DEGs <- read_tsv(path_degs)
 
 degs_in_loops_spec <- list()
 
@@ -306,5 +306,9 @@ gsea_degs_all
 
 ##
 
+
+# Save DEGs for EnrichR
+#degs_in_loops_spec[["scr"]] %>% filter(DE == "Down") %>% .$gene_name %>% as.data.frame %>% write_tsv(., fs::path(path_output, "/data/scr_specific_loops_DEGs.Down.tsv"))
+#degs_in_loops_spec[["kd"]] %>% filter(DE == "Up") %>% .$gene_name %>% as.data.frame %>% write_tsv(., fs::path(path_output, "/data/kd_specific_loops_DEGs.Down.tsv"))
 
 
