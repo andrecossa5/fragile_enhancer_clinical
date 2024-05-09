@@ -11,11 +11,12 @@ import os
 #from SigProfilerMatrixGenerator import install as genInstall
 #genInstall.install('GRCh37', bash=True)
 
-WIN = 50
+WIN = 500
 UNIT = "bp"
 
 IN_FOLDER = "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/"
-OUT_FOLDER = "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/mutational_signature_analysis.{}{}_WIN/".format(WIN, UNIT)
+#OUT_FOLDER = "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/mutational_signature_analysis.{}{}_WIN/".format(WIN, UNIT)
+OUT_FOLDER = "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/mutational_signature_analysis.{}{}_WIN.BRCA_D/".format(WIN, UNIT)
 if not os.path.exists(OUT_FOLDER):
     os.makedirs(OUT_FOLDER)
 
@@ -24,7 +25,8 @@ if not os.path.exists(OUT_FOLDER):
 
 
 # Read variants 
-SSMs_grhl = pd.read_csv(IN_FOLDER+"Table_enh_SSMs_GRHL.all_overlaps.{}{}_WIN.tsv".format(WIN,UNIT), sep = "\t") 
+#SSMs_grhl = pd.read_csv(IN_FOLDER+"Table_enh_SSMs_GRHL.all_overlaps.{}{}_WIN.tsv".format(WIN,UNIT), sep = "\t") 
+SSMs_grhl = pd.read_csv(IN_FOLDER+"Table_enh_SSMs_GRHL.all_overlaps.{}{}_WIN.BRCA_D.tsv".format(WIN,UNIT), sep = "\t") 
 #SSMs_grhl = pd.read_csv(IN_FOLDER+"Table_enh_SSMs_GRHL.all_overlaps.tsv", sep = "\t") 
 
 # Define 'high' and 'low' clusters

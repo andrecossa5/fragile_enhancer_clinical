@@ -64,8 +64,8 @@ brcaN <- brca[!brca$brca_mut, ]$icgc_donor_id
 
 
 ### 
-WIN <- 3000
-UNIT <- "pb"
+WIN <- 500
+UNIT <- "bp"
 MARKERS <- names(enh_all)
 
 ```
@@ -117,7 +117,7 @@ for(name in names(grhl2_SSMs_strat)){
   df <- df %>% relocate(., summit, .before = start) 
   df$ssm_id <- paste(paste(df$seqnames_sbj, df$start_sbj-1, sep=":"), df$end_sbj,sep="-")
   df <- df %>% relocate(., ssm_id, .before = seqnames_sbj)
-  #write_tsv(df, paste0(OUT_FOLDER_DATA, sprintf("Table_enh_SSMs_%s.all_overlaps.%s%s_WIN.%s.tsv", marker, WIN, UNIT, name)))
+  write_tsv(df, paste0(OUT_FOLDER_DATA, sprintf("Table_enh_SSMs_%s.all_overlaps.%s%s_WIN.%s.tsv", marker, WIN, UNIT, name)))
 }
 
     
