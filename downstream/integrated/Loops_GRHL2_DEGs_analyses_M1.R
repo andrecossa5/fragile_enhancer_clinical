@@ -8,7 +8,7 @@ library(gridExtra)
 source("/Users/ieo6983/Desktop/enhancers_project/Analyses/loops/loops_functions.R")
 
 ### Hi-ChIP Loops ###
-kb <- 4
+kb <- 2
 
 path_main <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical"
 path_data <- fs::path(path_main, "data") 
@@ -309,6 +309,6 @@ gsea_degs_all
 
 # Save DEGs for EnrichR
 #degs_in_loops_spec[["scr"]] %>% filter(DE == "Down") %>% .$gene_name %>% as.data.frame %>% write_tsv(., fs::path(path_output, "/data/scr_specific_loops_DEGs.Down.tsv"))
-#degs_in_loops_spec[["kd"]] %>% filter(DE == "Up") %>% .$gene_name %>% as.data.frame %>% write_tsv(., fs::path(path_output, "/data/kd_specific_loops_DEGs.Down.tsv"))
+#degs_in_loops_spec[["kd"]] %>% filter(DE == "Up") %>% .$gene_name %>% as.data.frame %>% write_tsv(., fs::path(path_output, "/data/kd_specific_loops_DEGs.Up.tsv"))
 
 

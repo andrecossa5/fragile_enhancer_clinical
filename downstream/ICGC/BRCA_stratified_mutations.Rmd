@@ -1,0 +1,153 @@
+---
+title: "BRCA_mutations_stratification"
+output: html_document
+date: "2024-05-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+library(tidyverse)
+library(GenomicRanges)
+library(reshape2)
+
+SEED <- 4321
+set.seed(SEED)
+
+```
+
+```{r}
+source("/Users/ieo6983/Desktop/fragile_enhancer_clinical/utils/functions_genomics.R")
+
+IN_FOLDER <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/"
+OUT_FOLDER_DATA <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/"
+OUT_FOLDER_PLOTS <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/plots/"
+
+```
+
+
+### Input files ###
+```{r}
+# SSMs
+SSMs <- read_tsv(paste(IN_FOLDER, "./data/genomics/pre_processed_ICGC/simple_somatic_mutation.open.matching_calls.tsv", sep=""))
+SSMs <- SSMs[, -c(9,14)]
+colnames(SSMs)[c(7,8)] <- c("start", "end") 
+SSMs$chromosome <- paste("chr", SSMs$chromosome, sep = "")
+SSMs_gr <- makeGRangesFromDataFrame(SSMs, keep.extra.columns = T)
+
+
+# ALL enhancers: CtIP, GRHL
+columns_names <- c("chrom", "start", "end", "cluster")
+enh_ctip <- read_tsv(paste(IN_FOLDER, "data/functional_genomics/others/Cluster_CtIP_Enh_All.txt", sep=""), col_names = columns_names,
+                     comment = "#")
+enh_grhl <- read_tsv(paste(IN_FOLDER, "data/functional_genomics/others/Cluster_GRHL_Enh_All.txt", sep=""), col_names = columns_names, 
+                     comment = "#")
+enh_all <- list("CtIP" = enh_ctip, "GRHL" = enh_grhl)
+# add summit & name
+enh_all <- lapply(enh_all, function(df){
+  df$summit <- df$end
+  df$name <- str_c(df$chrom, df$summit, sep=":")
+  return(df)})
+
+
+# Putative enhancers: H3K27ac (no CtIP, GRHL, MRE11, self_overlaps)
+put_enhancers <- read_tsv(paste(IN_FOLDER, "data/functional_genomics/others/PutativeEnhnacers_MCF10A_hg19.filtered_GRHL_CtIP_MRE11_self.tsv", sep=""))
+colnames(put_enhancers)[1] <- "chrom" 
+put_enhancers$summit <- put_enhancers$end
+
+
+## HR-deficiency (BRCA somatic mutations) info - brcaT = BRCA-D  brcaF = BRCA-N
+brca <- read_tsv("/Users/ieo6983/Desktop/enhancers_project/data/ICGC/icgc_data/metadata/simple_somatic_mutations.donors_brca_mutations.tsv")
+
+label <- "brca_stratified"
+brcaD <- brca[brca$brca_mut, ]$icgc_donor_id
+brcaN <- brca[!brca$brca_mut, ]$icgc_donor_id
+
+
+### 
+WIN <- 3000
+UNIT <- "pb"
+MARKERS <- names(enh_all)
+
+```
+
+
+```{r}
+input_variants <- SSMs
+input_variants_gr <- SSMs_gr
+
+
+
+enh_SSMs_tables <- vector("list", length(MARKERS))
+names(enh_SSMs_tables) <- MARKERS
+
+for(marker in MARKERS){
+  mut <- "SSMs"
+  
+  # CtIP/GRHL enhancers
+  marker_enh <- enh_all[[marker]] # select enhancer with 'marker'
+  
+  # Extend regions of 'win' from summit
+  marker_enh$start <- marker_enh$summit - WIN
+  marker_enh$end <- marker_enh$summit + WIN
+
+  # Create GRanges objects 
+  enh_gr <- makeGRangesFromDataFrame(marker_enh, keep.extra.columns = T)
+  
+  
+  # Find mutations / enhancers overlaps 
+  hits_obj_enh <- findOverlaps(query=enh_gr, subject=SSMs_gr)
+  SSMs_sbj <- data.frame(SSMs_gr[subjectHits(hits_obj_enh)])
+  colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
+  enh_SSMs <- cbind(data.frame(enh_gr[queryHits(hits_obj_enh)]), SSMs_sbj) 
+  
+  enh_SSMs_tables[[marker]] <- enh_SSMs
+}
+
+
+# Stratify SSMs based on patients with BRCA-mutations
+brcaD_SSMs <- enh_SSMs_tables$GRHL[enh_SSMs_tables$GRHL$icgc_donor_id %in% brcaD, ]
+brcaN_SSMs <- enh_SSMs_tables$GRHL[enh_SSMs_tables$GRHL$icgc_donor_id %in% brcaN, ]
+grhl2_SSMs_strat <- list("BRCA_D" = brcaD_SSMs, "BRCA_N" = brcaN_SSMs)
+
+# Save stratified tables
+for(name in names(grhl2_SSMs_strat)){
+  print(name)
+  df <- grhl2_SSMs_strat[[name]]
+  
+  df <- df %>% relocate(., summit, .before = start) 
+  df$ssm_id <- paste(paste(df$seqnames_sbj, df$start_sbj-1, sep=":"), df$end_sbj,sep="-")
+  df <- df %>% relocate(., ssm_id, .before = seqnames_sbj)
+  #write_tsv(df, paste0(OUT_FOLDER_DATA, sprintf("Table_enh_SSMs_%s.all_overlaps.%s%s_WIN.%s.tsv", marker, WIN, UNIT, name)))
+}
+
+    
+
+```
+
+
+```{r}
+## Stats
+n_don <- table(brca$brca_mut)
+names(n_don) <- c("BRCA_N", "BRCA_D")
+print("Number of donors with and without BRCA mutations")
+print(n_don)
+
+print("Total number of mutations overlapping with GRHL2 enhancers")
+print(paste0("BRCA-D: ", dim(brcaD_SSMs)[1]))
+print(paste0("BRCA-N: ", dim(brcaN_SSMs)[1]))
+
+for(name in names(grhl2_SSMs_strat)){
+  df <- grhl2_SSMs_strat[[name]]  
+  n_muts <- df %>% group_by(icgc_donor_id) %>% 
+    dplyr::summarise(n = length(unique(icgc_mutation_id)))
+  
+  na_don <- n_don[[name]] - length(unique(df$icgc_donor_id))
+  avg_x_group <- round(mean(c(n_muts$n, rep(0, na_don))))
+  print("Avg. number of SSMs x patient")
+  print(paste0(name, ": ", avg_x_group))
+}
+
+
+
+```
+
