@@ -63,7 +63,7 @@ generate_random_seqs <- function(seed, n_seqs, win){
 
 compute_stat_enhancers <- function(input_overlaps, source_enhancers_df, classes){
   df_all_stats <- data.frame(matrix(ncol = length(input_overlaps), # Bottom line will give error sapply(list(source_enhancers_df)) ??
-                                    nrow = max(sapply(list(marker_enh_high, marker_enh_low), function(df) dim(df)[1]))))
+                                    nrow = max(sapply(source_enhancers_df, function(df) dim(df)[1]))))
   
   colnames(df_all_stats) <- classes
   

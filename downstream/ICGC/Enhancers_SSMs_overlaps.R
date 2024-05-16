@@ -38,7 +38,7 @@ PUT_ENH$summit <- PUT_ENH$start # add summit location
 ### 
 OUT_FOLDER_DATA <- "~/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/"
 OUT_FOLDER_PLOTS <- "~/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/plots/"
-WIN <- 500
+WIN <- 3
 MARKERS <- c("CtIP", "GRHL") 
 
 
@@ -206,8 +206,8 @@ for(m in MARKERS){
 # RegulomeDB has 0-based coordinates
 # ICGC has 1-based coordinates - https://docs.icgc.org/submission/guide/icgc-simple-somatic-mutation-format/
 
-enh_SSMs_ctip <- read_tsv(paste(OUT_FOLDER_DATA, "Table_enh_SSMs_CtIP.all_overlaps.tsv",sep=""))
-enh_SSMs_grhl <- read_tsv(paste(OUT_FOLDER_DATA, "Table_enh_SSMs_GRHL.all_overlaps.tsv",sep=""))
+enh_SSMs_ctip <- read_tsv(paste0(OUT_FOLDER_DATA, "Table_enh_SSMs_CtIP.all_overlaps.", WIN, "kb_WIN.tsv"))
+enh_SSMs_grhl <- read_tsv(paste0(OUT_FOLDER_DATA, "Table_enh_SSMs_GRHL.all_overlaps.", WIN, "kb_WIN.tsv"))
 
 
 snvs_coords_ctip <- enh_SSMs_ctip %>% dplyr::select(seqnames_sbj, start_sbj, end_sbj) %>%
