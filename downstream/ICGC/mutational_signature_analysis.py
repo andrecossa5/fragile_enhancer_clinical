@@ -11,12 +11,18 @@ import os
 #from SigProfilerMatrixGenerator import install as genInstall
 #genInstall.install('GRCh37', bash=True)
 
-WIN = 500
-UNIT = "bp"
+WIN = 1
+UNIT = "kb"
+MARKER = "CtIP" # or GRHL2
+
+ANALYSIS = "stratified"
+GROUP = "BRCA_D"
 
 IN_FOLDER = "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/"
-#OUT_FOLDER = "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/mutational_signature_analysis.{}{}_WIN/".format(WIN, UNIT)
-OUT_FOLDER = "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/mutational_signature_analysis.{}{}_WIN.BRCA_D/".format(WIN, UNIT)
+if ANALYSIS == "stratified":
+    OUT_FOLDER = "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/{}.mutational_signature_analysis.{}{}_WIN.{}/".format(MARKER, WIN, UNIT, GROUP)    
+else:
+    OUT_FOLDER = "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/{}.mutational_signature_analysis.{}{}_WIN/".format(MARKER, WIN, UNIT)
 if not os.path.exists(OUT_FOLDER):
     os.makedirs(OUT_FOLDER)
 
@@ -25,60 +31,60 @@ if not os.path.exists(OUT_FOLDER):
 
 
 # Read variants 
-#SSMs_grhl = pd.read_csv(IN_FOLDER+"Table_enh_SSMs_GRHL.all_overlaps.{}{}_WIN.tsv".format(WIN,UNIT), sep = "\t") 
-SSMs_grhl = pd.read_csv(IN_FOLDER+"Table_enh_SSMs_GRHL.all_overlaps.{}{}_WIN.BRCA_D.tsv".format(WIN,UNIT), sep = "\t") 
-#SSMs_grhl = pd.read_csv(IN_FOLDER+"Table_enh_SSMs_GRHL.all_overlaps.tsv", sep = "\t") 
+#SSMs = pd.read_csv(IN_FOLDER+"Table_enh_SSMs_{}.all_overlaps.{}{}_WIN.tsv".format(MARKER, WIN,UNIT), sep = "\t") 
+SSMs = pd.read_csv(IN_FOLDER+"Table_enh_SSMs_{}.all_overlaps.{}{}_WIN.{}.tsv".format(MARKER, WIN,UNIT,GROUP), sep = "\t") 
 
 # Define 'high' and 'low' clusters
-clust_high_grhl = ["GRHL_cluster_1_Enh", "GRHL_cluster_2_Enh", "GRHL_cluster_4_Enh"]
-#clust_high_ctip = ["CtIP_cluster_2_Enh", "CtIP_cluster_3_Enh", "CtIP_cluster_5_Enh"]
-clust_low_grhl = ["GRHL_cluster_5.2_Enh", "GRHL_cluster_5.3_Enh", "GRHL_cluster_5.1_Enh", "GRHL_cluster_5.0"]
-#clust_low_ctip = ["CtIP_cluster_6.2_Enh", "CtIP_cluster_6.3_Enh", "CtIP_cluster_6.1_Enh", "CtIP_cluster_6.0"]
-
 clusters = {
-    "high" : clust_high_grhl, 
-    "low" : clust_low_grhl
+    "GRHL2" : {
+        "high" : ["GRHL_cluster_1_Enh", "GRHL_cluster_2_Enh", "GRHL_cluster_4_Enh"],
+        "low" : ["GRHL_cluster_5.2_Enh", "GRHL_cluster_5.3_Enh", "GRHL_cluster_5.1_Enh", "GRHL_cluster_5.0"]
+    },
+    "CtIP" : {
+        "high" : ["CtIP_cluster_2_Enh", "CtIP_cluster_3_Enh", "CtIP_cluster_5_Enh"],
+        "low" : ["CtIP_cluster_6.2_Enh", "CtIP_cluster_6.3_Enh", "CtIP_cluster_6.1_Enh", "CtIP_cluster_6.0"]
     }
+}
 
 
 ##
 
 
 # Generate mutational matrices 
-for label in clusters.keys():
+for label in clusters[MARKER].keys():
     print(label)
 
-    SSMs_grhl_sub = SSMs_grhl[SSMs_grhl['cluster'].isin(clusters[label]) & SSMs_grhl['width_sbj'] == 1]
+    SSMs_sub = SSMs[SSMs['cluster'].isin(clusters[MARKER][label]) & SSMs['width_sbj'] == 1]
 
     # Convert to appropriate format 
-    format_ssms_grhl = {
-        'Project' : SSMs_grhl_sub['project_code'],
-        'Sample' : SSMs_grhl_sub['icgc_sample_id'],
-        'ID' : SSMs_grhl_sub['icgc_donor_id'],
+    format_ssms = {
+        'Project' : SSMs_sub['project_code'],
+        'Sample' : SSMs_sub['icgc_sample_id'],
+        'ID' : SSMs_sub['icgc_donor_id'],
         'Genome' : "GRCh37",
         'mut_type' : "SNP", 
-        'chrom' : SSMs_grhl_sub['seqnames_sbj'], 
-        'pos_start' : SSMs_grhl_sub['start_sbj'], 
-        'pos_end' : SSMs_grhl_sub['end_sbj'], 
-        'ref' : SSMs_grhl_sub['reference_genome_allele'], 
-        'alt' : SSMs_grhl_sub['mutated_to_allele'], 
+        'chrom' : SSMs_sub['seqnames_sbj'], 
+        'pos_start' : SSMs_sub['start_sbj'], 
+        'pos_end' : SSMs_sub['end_sbj'], 
+        'ref' : SSMs_sub['reference_genome_allele'], 
+        'alt' : SSMs_sub['mutated_to_allele'], 
         'Type' : "SOMATIC"
     }
-    format_ssms_grhl = pd.DataFrame(format_ssms_grhl)
+    format_ssms = pd.DataFrame(format_ssms)
 
     # Save formatted file - required for matrix generation. The folder with input file will correspond to the output folder
-    dir_results = OUT_FOLDER+'SNVs_GRHL_{}/'.format(label)
+    dir_results = OUT_FOLDER+'SNVs_{}_{}/'.format(MARKER, label)
     if not os.path.exists(dir_results):
         os.makedirs(dir_results)
-    format_ssms_grhl.to_csv(dir_results+'input.SNVs_grhl_{}.txt'.format(label), index=None, sep = '\t')
+    format_ssms.to_csv(dir_results+'input.SNVs_{}_{}.txt'.format(MARKER,label), index=None, sep = '\t')
 
     #
 
     ## Generate mutational matrix - For each sample
     path_to_file = OUT_FOLDER # Full path of the saved input files in the desired output folder.
     
-    print("Generating mutational matrix for GRHL2 SNVs - Cluster {}".format(label))
-    matrices = matGen.SigProfilerMatrixGeneratorFunc("SNVs_GRHL_{}".format(label), "GRCh37", path_to_file+'SNVs_GRHL_{}/'.format(label), 
+    print("Generating mutational matrix for {} SNVs - Cluster {}".format(MARKER, label))
+    matrices = matGen.SigProfilerMatrixGeneratorFunc("SNVs_{}_{}".format(MARKER, label), "GRCh37", path_to_file+'SNVs_{}_{}/'.format(MARKER, label), 
                                                     exome=False, bed_file=None, chrom_based=False, 
                                                     plot=True, tsb_stat=False, seqInfo=True)
     
@@ -90,13 +96,13 @@ for label in clusters.keys():
 # Use SigProfilerAssignment's main function for mutational signatures assignment
 # COSMIC v3.3 mutational signatures are used by default as the input reference signatures
 
-for label in clusters.keys():
+for label in clusters[MARKER].keys():
     file_pattern = "*SBS96.all"
 
-    dir_matrices = path_to_file + "SNVs_GRHL_{}/output/SBS/".format(label)        
+    dir_matrices = path_to_file + "SNVs_{}_{}/output/SBS/".format(MARKER,label)        
     file_list = glob.glob(dir_matrices+file_pattern)[0]
 
-    dir_results_signatures = path_to_file+"SNVs_GRHL_{}/SigProfilerAssignment_output".format(label) 
+    dir_results_signatures = path_to_file+"SNVs_{}_{}/SigProfilerAssignment_output".format(MARKER, label) 
     if not os.path.exists(dir_results_signatures):
         os.makedirs(dir_results_signatures)
 
@@ -110,25 +116,25 @@ for label in clusters.keys():
 
 # Extract activity values for each signature
 top_n = 5
-for label in clusters.keys():
-    dir_results_signatures_activities = OUT_FOLDER+"SNVs_GRHL_{}/SigProfilerAssignment_output/Assignment_Solution/Activities/".format(label) 
+for label in clusters[MARKER].keys():
+    dir_results_signatures_activities = OUT_FOLDER+"SNVs_{}_{}/SigProfilerAssignment_output/Assignment_Solution/Activities/".format(MARKER, label) 
 
-    SBS_freqs_grhl = pd.read_csv(dir_results_signatures_activities+"Assignment_Solution_Activities.txt", 
-                             sep = "\t", index_col='Samples')
+    SBS_freqs = pd.read_csv(dir_results_signatures_activities+"Assignment_Solution_Activities.txt", 
+                            sep = "\t", index_col='Samples')
 
     # most frequent, aka present in most samples, although not necessarily with more mutations x signature
-    total_freqs_grhl = SBS_freqs_grhl.sum().sort_values(ascending=False)[0:top_n]
+    total_freqs = SBS_freqs.sum().sort_values(ascending=False)[0:top_n]
 
-    print(f'\n{label} - GRHL2 enhancers\n')
+    print(f'\n{label} - {MARKER} enhancers\n')
 
     print("Most active Signatures - Signatures with most mutations")
     print(
-        total_freqs_grhl
+        total_freqs
     )
 
     print("Most frequent Signatures - Signatures present in most samples")
     print(
-        (SBS_freqs_grhl != 0).sum().sort_values(ascending=False)[0:top_n]
+        (SBS_freqs != 0).sum().sort_values(ascending=False)[0:top_n]
     )
 
 
@@ -140,13 +146,13 @@ from SigProfilerExtractor import sigpro as sig # for de-novo extraction of signa
 from SigProfilerAssignment import Analyzer as Analyze # to assign SSMs to a set of de-novo signatures
 
 # Extract signatures de-novo from mutational matrix 
-for label in clusters.keys():
+for label in clusters[MARKER].keys():
     file_pattern = "*SBS96.all"
 
-    dir_matrices = OUT_FOLDER + "SNVs_GRHL_{}/output/SBS/".format(label)        
+    dir_matrices = OUT_FOLDER + "SNVs_{}_{}/output/SBS/".format(MARKER, label)        
     input_file = glob.glob(dir_matrices+file_pattern)[0]
 
-    out_folder_sig = OUT_FOLDER+"SNVs_GRHL_{}/de_novo/sig_extraction".format(label) 
+    out_folder_sig = OUT_FOLDER+"SNVs_{}_{}/de_novo/sig_extraction".format(MARKER, label) 
     if not os.path.exists(out_folder_sig):
         os.makedirs(out_folder_sig)
 

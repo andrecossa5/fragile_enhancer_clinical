@@ -64,7 +64,7 @@ brcaN <- brca[!brca$brca_mut, ]$icgc_donor_id
 
 
 ### 
-WIN <- 500
+WIN <- 1000
 UNIT <- "bp"
 MARKERS <- names(enh_all)
 
@@ -103,24 +103,30 @@ for(marker in MARKERS){
   enh_SSMs_tables[[marker]] <- enh_SSMs
 }
 
+```
+
+```{r}
+marker <- "CtIP"
 
 # Stratify SSMs based on patients with BRCA-mutations
+brcaD_SSMs <- enh_SSMs_tables$CtIP[enh_SSMs_tables$CtIP$icgc_donor_id %in% brcaD, ]
+brcaN_SSMs <- enh_SSMs_tables$CtIP[enh_SSMs_tables$CtIP$icgc_donor_id %in% brcaN, ]
+ctip_SSMs_strat <- list("BRCA_D" = brcaD_SSMs, "BRCA_N" = brcaN_SSMs)
+
 brcaD_SSMs <- enh_SSMs_tables$GRHL[enh_SSMs_tables$GRHL$icgc_donor_id %in% brcaD, ]
 brcaN_SSMs <- enh_SSMs_tables$GRHL[enh_SSMs_tables$GRHL$icgc_donor_id %in% brcaN, ]
 grhl2_SSMs_strat <- list("BRCA_D" = brcaD_SSMs, "BRCA_N" = brcaN_SSMs)
 
 # Save stratified tables
-for(name in names(grhl2_SSMs_strat)){
+for(name in names(ctip_SSMs_strat)){
   print(name)
-  df <- grhl2_SSMs_strat[[name]]
+  df <- ctip_SSMs_strat[[name]]
   
   df <- df %>% relocate(., summit, .before = start) 
   df$ssm_id <- paste(paste(df$seqnames_sbj, df$start_sbj-1, sep=":"), df$end_sbj,sep="-")
   df <- df %>% relocate(., ssm_id, .before = seqnames_sbj)
   write_tsv(df, paste0(OUT_FOLDER_DATA, sprintf("Table_enh_SSMs_%s.all_overlaps.%s%s_WIN.%s.tsv", marker, WIN, UNIT, name)))
 }
-
-    
 
 ```
 
