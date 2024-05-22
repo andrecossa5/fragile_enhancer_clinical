@@ -200,3 +200,13 @@ compute_pval_dist_cases <- function(n_samples = 1000, start_seed = 4321,
 } 
 
 
+
+#' Plot distribution of SNVs over enhancers
+#' 
+#' Given ...
+#' 
+#' @param 
+#' @returns description
+#' TODO: implement 
+
+

@@ -51,12 +51,12 @@ find_loops_overlapping_enhancers <- function(enhancers_file,
   
   # Find overlaps 
   #bin1
-  ovrlp_bin1 <- findOverlaps(loops_bin1_gr, enhancers_gr, select = "arbitrary")
+  ovrlp_bin1 <- findOverlaps(loops_bin1_gr, enhancers_gr, select = "first")
   enh_1 <- enhancers_file[ovrlp_bin1, c("name", "cluster")]
   colnames(enh_1) <- paste0(colnames(enh_1), 1)
   loops_bin1_ovrlp <- cbind(loops_bin1, enh_1) # GRanges are extended, but df remains as originally
   #bin2
-  ovrlp_bin2 <- findOverlaps(loops_bin2_gr, enhancers_gr, select = "arbitrary")
+  ovrlp_bin2 <- findOverlaps(loops_bin2_gr, enhancers_gr, select = "first")
   enh_2 <- enhancers_file[ovrlp_bin2, c("name", "cluster")]
   colnames(enh_2) <- paste0(colnames(enh_2), 2)
   loops_bin2_ovrlp <- cbind(loops_bin2, enh_2) # GRanges are extended, but df remains as originally
@@ -102,12 +102,12 @@ find_loops_overlapping_enhancers_m2 <- function(enhancers_file,
   
   # Find overlaps 
   #bin1
-  ovrlp_bin1 <- findOverlaps(loops_bin1_gr, enhancers_gr, select = "arbitrary")
+  ovrlp_bin1 <- findOverlaps(loops_bin1_gr, enhancers_gr, select = "first")
   enh_1 <- enhancers_file[ovrlp_bin1, c("name", "cluster")]
   colnames(enh_1) <- paste0(colnames(enh_1), 1)
   loops_bin1_ovrlp <- cbind(loops_bin1, enh_1) 
   #bin2
-  ovrlp_bin2 <- findOverlaps(loops_bin2_gr, enhancers_gr, select = "arbitrary")
+  ovrlp_bin2 <- findOverlaps(loops_bin2_gr, enhancers_gr, select = "first")
   enh_2 <- enhancers_file[ovrlp_bin2, c("name", "cluster")]
   colnames(enh_2) <- paste0(colnames(enh_2), 2)
   loops_bin2_ovrlp <- cbind(loops_bin2, enh_2) 
@@ -158,12 +158,12 @@ find_additional_promoters_overlap <- function(tss_file,
   
   # Find overlaps 
   #bin1
-  ovrlp_bin1 <- findOverlaps(loops_bin1_gr, tss_gr, select = "arbitrary")
+  ovrlp_bin1 <- findOverlaps(loops_bin1_gr, tss_gr, select = "first")
   tss_1 <- tss_file[ovrlp_bin1, c("gene_name")]
   colnames(tss_1) <- paste0(colnames(tss_1), 1)
   loops_bin1_ovrlp <- cbind(loops_bin1, tss_1) # GRanges are extended, but df remains as originally
   #bin2
-  ovrlp_bin2 <- findOverlaps(loops_bin2_gr, tss_gr, select = "arbitrary")
+  ovrlp_bin2 <- findOverlaps(loops_bin2_gr, tss_gr, select = "first")
   tss_2 <- tss_file[ovrlp_bin2, c("gene_name")]
   colnames(tss_2) <- paste0(colnames(tss_2), 2)
   loops_bin2_ovrlp <- cbind(loops_bin2, tss_2) # GRanges are extended, but df remains as originally
@@ -220,12 +220,12 @@ find_additional_DEGS_overlap <- function(DEGs_tss_file,
   
   # Find overlaps 
   #bin1
-  ovrlp_bin1 <- findOverlaps(loops_bin1_gr, tss_gr, select = "arbitrary")
+  ovrlp_bin1 <- findOverlaps(loops_bin1_gr, tss_gr, select = "first")
   tss_1 <- tss_file[ovrlp_bin1, c("gene_name", "DE", "log2FoldChange", "padj")]
   colnames(tss_1) <- paste0(colnames(tss_1), 1)
   loops_bin1_ovrlp <- cbind(loops_bin1, tss_1) # GRanges are extended, but df remains as originally
   #bin2
-  ovrlp_bin2 <- findOverlaps(loops_bin2_gr, tss_gr, select = "arbitrary")
+  ovrlp_bin2 <- findOverlaps(loops_bin2_gr, tss_gr, select = "first")
   tss_2 <- tss_file[ovrlp_bin2, c("gene_name", "DE", "log2FoldChange", "padj")]
   colnames(tss_2) <- paste0(colnames(tss_2), 2)
   loops_bin2_ovrlp <- cbind(loops_bin2, tss_2) # GRanges are extended, but df remains as originally
@@ -279,12 +279,12 @@ find_additional_DEGS_overlap_m2 <- function(DEGs_tss_file,
   
   # Find overlaps 
   #bin1
-  ovrlp_bin1 <- findOverlaps(loops_bin1_gr, tss_gr, select = "arbitrary")
+  ovrlp_bin1 <- findOverlaps(loops_bin1_gr, tss_gr, select = "first")
   tss_1 <- tss_file[ovrlp_bin1, c("gene_name", "DE", "log2FoldChange", "padj")]
   colnames(tss_1) <- paste0(colnames(tss_1), 1)
   loops_bin1_ovrlp <- cbind(loops_bin1, tss_1) 
   #bin2
-  ovrlp_bin2 <- findOverlaps(loops_bin2_gr, tss_gr, select = "arbitrary")
+  ovrlp_bin2 <- findOverlaps(loops_bin2_gr, tss_gr, select = "first")
   tss_2 <- tss_file[ovrlp_bin2, c("gene_name", "DE", "log2FoldChange", "padj")]
   colnames(tss_2) <- paste0(colnames(tss_2), 2)
   loops_bin2_ovrlp <- cbind(loops_bin2, tss_2)
