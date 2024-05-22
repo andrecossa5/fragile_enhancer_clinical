@@ -9,9 +9,12 @@ library(gridExtra)
   
 source("./Desktop/enhancers_project/Analyses/loops/loops_functions.R")
 
+SEED <- 4321
+set.seed(SEED)
+
 
 ### Hi-ChIP Loops ###
-kb <- 2
+kb <- 4
 
 path_main <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical"
 path_data <- fs::path(path_main, "data") 
@@ -83,6 +86,9 @@ kd_enh_specific <- inner_join(kd_enh, kd_specific, by = c('seqnames1', 'start1',
 
 common_enh <- inner_join(scr_enh, kd_enh, by = c('seqnames1', 'start1', 'end1', 'seqnames2', 'start2', 'end2'), 
                      suffix = c("_SCR", "_KD"))
+
+dim(scr_enh)[1] == dim(scr_enh_specific)[1] + dim(common_enh)[1]
+dim(kd_enh)[1] == dim(kd_enh_specific)[1] + dim(common_enh)[1]
 
 
 ##
@@ -218,6 +224,10 @@ print(sprintf("~%d%% of GRHL2 enhancer-associated loops have at least 1 bin with
 
 scr_enh_degs_spec <- inner_join(scr_enh_degs, scr_specific, by = c('seqnames1', 'start1', 'end1', 'seqnames2', 'start2', 'end2'))
 kd_enh_degs_spec <- inner_join(kd_enh_degs, kd_specific, by = c('seqnames1', 'start1', 'end1', 'seqnames2', 'start2', 'end2'))
+enh_degs_common <- inner_join(scr_enh_degs, kd_enh_degs, by = c('seqnames1', 'start1', 'end1', 'seqnames2', 'start2', 'end2'))
+
+dim(scr_enh_degs)[1] == dim(scr_enh_degs_spec)[1]+dim(enh_degs_common)[1]
+dim(kd_enh_degs)[1] == dim(kd_enh_degs_spec)[1]+dim(enh_degs_common)[1]
 
 # Loops involving one GRHL2-enhancer and 1 DEG
 scr_enh_degs_only <- scr_enh_degs %>% filter(!((is.na(name1) & is.na(gene_name1)) | (is.na(name2) & is.na(gene_name2)))) %>% 
@@ -227,6 +237,11 @@ kd_enh_degs_only <- kd_enh_degs %>% filter(!((is.na(name1) & is.na(gene_name1)) 
 
 scr_enh_degs_only_spec <- inner_join(scr_enh_degs_only , scr_specific, by = c('seqnames1', 'start1', 'end1', 'seqnames2', 'start2', 'end2'))
 kd_enh_degs_only_spec <- inner_join(kd_enh_degs_only , kd_specific, by = c('seqnames1', 'start1', 'end1', 'seqnames2', 'start2', 'end2'))
+
+enh_degs_only_common <- inner_join(scr_enh_degs_only, kd_enh_degs_only, by = c('seqnames1', 'start1', 'end1', 'seqnames2', 'start2', 'end2'))
+
+dim(scr_enh_degs_only)[1] == dim(scr_enh_degs_only_spec)[1]+dim(enh_degs_only_common)[1]
+dim(kd_enh_degs_only)[1] == dim(kd_enh_degs_only_spec)[1]+dim(enh_degs_only_common)[1]
 
 # Save tables
 #scr_enh_degs_only %>% write_tsv(., fs::path(path_output, sprintf("/data/%skb_SCR.anno_loops.GRHL2_enh_DEGs_prom_ONLY",kb), ext = "tsv"))
