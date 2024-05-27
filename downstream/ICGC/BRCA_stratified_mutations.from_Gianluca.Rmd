@@ -28,11 +28,15 @@ OUT_FOLDER_PLOTS <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/IC
 ### Input files ###
 ```{r}
 # SSMs
-SSMs <- read_tsv(paste(IN_FOLDER, "./data/genomics/pre_processed_ICGC/simple_somatic_mutation.open.matching_calls.tsv", sep=""))
+SSMs <- read_tsv("/Users/ieo6983/Desktop/fragile_enhancer_clinical/data/genomics/pre_processed_ICGC/from_gianluca.ssm.pcawg.coord.tsv")
 
-SSMs <- SSMs[, -c(9,14)]
-colnames(SSMs)[c(7,8)] <- c("start", "end") 
-SSMs$chromosome <- paste("chr", SSMs$chromosome, sep = "")
+cols <- c("icgc_mutation_id", "icgc_donor_id", "project_code", "icgc_specimen_id", "icgc_sample_id", "chromosome", 
+          "start", "end", "mutation_type", "reference_genome_allele", "mutated_from_allele","mutated_to_allele")
+
+SSMs$end <- SSMs$POS
+SSMs <- SSMs %>% relocate(., end, .after = POS)
+colnames(SSMs)[c(3, 4, 5)] <- c("seqnames", "start", "end")
+SSMs$custom_mutation_id <- str_c(SSMs$Type, SSMs$seqnames, SSMs$start, SSMs$end, sep = "_")
 SSMs_gr <- makeGRangesFromDataFrame(SSMs, keep.extra.columns = T)
 
 
@@ -77,7 +81,6 @@ input_variants <- SSMs
 input_variants_gr <- SSMs_gr
 
 
-
 enh_SSMs_tables <- vector("list", length(MARKERS))
 names(enh_SSMs_tables) <- MARKERS
 
@@ -108,12 +111,12 @@ for(marker in MARKERS){
 
 ```{r}
 # Stratify SSMs based on patients with BRCA-mutations
-brcaD_SSMs <- enh_SSMs_tables$CtIP[enh_SSMs_tables$CtIP$icgc_donor_id %in% brcaD, ]
-brcaN_SSMs <- enh_SSMs_tables$CtIP[enh_SSMs_tables$CtIP$icgc_donor_id %in% brcaN, ]
+brcaD_SSMs <- enh_SSMs_tables$CtIP[enh_SSMs_tables$CtIP$Sample %in% brcaD, ]
+brcaN_SSMs <- enh_SSMs_tables$CtIP[enh_SSMs_tables$CtIP$Sample %in% brcaN, ]
 ctip_SSMs_strat <- list("BRCA_D" = brcaD_SSMs, "BRCA_N" = brcaN_SSMs)
 
-brcaD_SSMs <- enh_SSMs_tables$GRHL[enh_SSMs_tables$GRHL$icgc_donor_id %in% brcaD, ]
-brcaN_SSMs <- enh_SSMs_tables$GRHL[enh_SSMs_tables$GRHL$icgc_donor_id %in% brcaN, ]
+brcaD_SSMs <- enh_SSMs_tables$GRHL[enh_SSMs_tables$GRHL$Sample %in% brcaD, ]
+brcaN_SSMs <- enh_SSMs_tables$GRHL[enh_SSMs_tables$GRHL$Sample %in% brcaN, ]
 grhl2_SSMs_strat <- list("BRCA_D" = brcaD_SSMs, "BRCA_N" = brcaN_SSMs)
 
 # Save stratified tables
@@ -143,10 +146,10 @@ print(paste0("BRCA-N: ", dim(brcaN_SSMs)[1]))
 
 for(name in names(grhl2_SSMs_strat)){
   df <- grhl2_SSMs_strat[[name]]  
-  n_muts <- df %>% group_by(icgc_donor_id) %>% 
-    dplyr::summarise(n = length(unique(icgc_mutation_id)))
+  n_muts <- df %>% group_by(Sample) %>% 
+    dplyr::summarise(n = length(unique(custom_mutation_id)))
   
-  na_don <- n_don[[name]] - length(unique(df$icgc_donor_id))
+  na_don <- n_don[[name]] - length(unique(df$Sample))
   avg_x_group <- round(mean(c(n_muts$n, rep(0, na_don))))
   print("Avg. number of SSMs x patient")
   print(paste0(name, ": ", avg_x_group))
@@ -181,11 +184,10 @@ for(marker in MARKERS){
   
   p <- markers_distances[[marker]] %>% 
     ggplot(., aes(x = dist_enh, fill = group, color = group))+
-    geom_density(alpha = 0.4, bw = bw)+
+    geom_density(alpha = 0.6, bw = bw)+
     labs(title = title)+
     theme_light()
   print(p)
-  #ggsave(plot = p, filename = paste0(OUT_FOLDER_PLOTS, "density.snvs_dist_over_enhancers.brca_stratified.all_clusters.", marker, ".png"), width = 9.986111, height = 7.083333, device = "png")
 }
     
 ```
@@ -229,7 +231,6 @@ for(marker in MARKERS){
     labs(title = title)+
     theme_light()
   print(p)
-  #ggsave(plot = p, filename = paste0(OUT_FOLDER_PLOTS, "density.snvs_dist_over_enhancers.brca_stratified.high_low_clusters.", marker, ".png"), width = 10.5, height = 7, device = "png")
 }
 
 
