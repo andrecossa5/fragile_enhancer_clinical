@@ -1,30 +1,40 @@
 
-
 library(tidyverse)
 library(ggplot2)
 
-MARKERS <- c("CtIP", "GRHL")
-anno_only <- F
-label <- "all_enhancers"
+path_overlaps <- fs::path("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/")
+path_results_data <- fs::path("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/")
 
-path_anno_enhancers <- fs::path("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/integrated/annotated_enhancers/")
-hart.ctip.dist <- read_tsv("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/Hartwig/snvs_distribution_over_enhancers/data/distances.snvs_distribution_over_enhancers.CtIP.all_clusters.all_enhancers.tsv")
-hart.grhl.dist <- read_tsv("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/Hartwig/snvs_distribution_over_enhancers/data/distances.snvs_distribution_over_enhancers.GRHL.all_clusters.all_enhancers.tsv")
-icgc.ctip.dist <- read_tsv("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/distances.snvs_distribution_over_enhancers.CtIP.all_clusters.tsv")
-icgc.grhl.dist <- read_tsv("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/distances.snvs_distribution_over_enhancers.GRHL.all_clusters.tsv")
+MARKERS <- c("CtIP", "GRHL")
+save_dist <- F
 
 
 ##
 
 
-if(anno_only == T){
-  label <- "only_annotated_ehancers_GRHL2"
-  annotated_enhancers <- read_tsv(fs::path(path_anno_enhancers, "2kb_GRHL2_enhancers.from_SCR_specific_loops.linked_to_DOWN_DEGs.tsv")) %>%
-    suppressMessages()
-  hart.grhl.dist <- hart.grhl.dist %>% filter(name %in% annotated_enhancers$name)
-  icgc.grhl.dist <- icgc.grhl.dist %>% filter(name %in% annotated_enhancers$name)
+# Extract distances of all PCAWG mutations from enhancer summits
+g.icgc.overlaps <- list(
+  "CtIP" = read_tsv(fs::path(path_overlaps, "Table_enh_SSMs_CtIP.all_overlaps.3kb_WIN.from_Gianluca.tsv")), 
+  "GRHL" = read_tsv(fs::path(path_overlaps, "Table_enh_SSMs_GRHL.all_overlaps.3kb_WIN.from_Gianluca.tsv"))
+)
+
+for(marker in MARKERS){
+  print(paste0("Computing distribution of SNVs distnaces from ", marker, " enhancers summit"))    
+  all_distances <- data.frame(dist = as.numeric(g.icgc.overlaps[[marker]]$start_sbj) - as.numeric(g.icgc.overlaps[[marker]]$summit), 
+                              cluster = g.icgc.overlaps[[marker]]$cluster)
+  if(save_dist == T){
+    all_distances %>% write_tsv(., fs::path(path_results_data, paste0("distances.snvs_distribution_over_enhancers.", marker, ".all_clusters.from_gianluca.tsv")))}
 }
 
+
+##
+
+
+# Plot density of variants over enhancer regions
+hart.ctip.dist <- read_tsv("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/Hartwig/snvs_distribution_over_enhancers/data/distances.snvs_distribution_over_enhancers.CtIP.all_clusters.tsv")
+hart.grhl.dist <- read_tsv("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/Hartwig/snvs_distribution_over_enhancers/data/distances.snvs_distribution_over_enhancers.GRHL.all_clusters.tsv")
+icgc.ctip.dist <- read_tsv("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/distances.snvs_distribution_over_enhancers.CtIP.all_clusters.from_gianluca.tsv")
+icgc.grhl.dist <- read_tsv("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/distances.snvs_distribution_over_enhancers.GRHL.all_clusters.from_gianluca.tsv")
 all_dfs <- list("CtIP" = list("hart" = hart.ctip.dist, "icgc" = icgc.ctip.dist), 
                 "GRHL" = list("hart" = hart.grhl.dist, "icgc" = icgc.grhl.dist))
 
@@ -38,23 +48,17 @@ df_full <- data.frame(
   "icgc.grhl" = c(icgc.grhl.dist$dist, rep(NA, max_length-dim(icgc.grhl.dist)[1]))
 )
 
-#pdf(paste0("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/Hartwig/snvs_distribution_over_enhancers/plots/density.snvs_distribution_over_enhancers.", label, ".pdf"), width = 8.5, height = 6.5)
-
-
-##
-
-
 for(marker in tolower(MARKERS)){
   df <- df_full[, endsWith(colnames(df_full), marker)]
   d <- df %>% pivot_longer(everything(), names_to = "source", values_to = "distances") %>%
     ggplot(., aes(x = distances, color = source, fill = source))+
     geom_density(bw = 100, alpha = 0.2)+
     theme_light()+
-    labs(title = paste0("All clusters of enhancers - ", marker), 
-                        subtitle = label)
+    labs(title = paste0("All clusters of enhancers - ", marker))
   print(d)
   
   #ggsave(plot=d, filename = paste0("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/Hartwig/snvs_distribution_over_enhancers/plots/density.snvs_distribution_over_enhancers.", marker,".all_clusters.hartwig_vs_icgc.png"), device = "png", width = 7, height = 5)
+  
 }
 
 
@@ -93,13 +97,11 @@ for(marker in tolower(MARKERS)){
     ggplot(., aes(x = distances, color = source, fill = source))+
     geom_density(bw = 100, alpha = 0.2)+
     theme_light()+
-    labs(title = paste0("High clusters - ", marker), 
-         subtitle = label)
+    labs(title = paste0("High clusters - ", marker))
   print(d)
   
   #ggsave(plot=d, filename = paste0("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/Hartwig/snvs_distribution_over_enhancers/plots/density.snvs_distribution_over_enhancers.", marker,".high_cluster.hartwig_vs_icgc.png"), device = "png", width = 7, height = 5)
 }
-
 
 # Low
 for(marker in tolower(MARKERS)){
@@ -108,12 +110,12 @@ for(marker in tolower(MARKERS)){
     ggplot(., aes(x = distances, color = source, fill = source))+
     geom_density(bw = 100, alpha = 0.2)+
     theme_light()+
-    labs(title = paste0("Low clusters - ", marker), 
-         subtitle = label)
+    labs(title = paste0("Low clusters - ", marker))
   print(d)
   
-  #ggsave(plot=d, filename = paste0("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/Hartwig/snvs_distribution_over_enhancers/plots/density.snvs_distribution_over_enhancers.", marker,".low_cluster.hartwig_vs_icgc.png"), device = "png", width = 7, height = 5)
+  #ggsave(plot=d, filename = paste0("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/Hartwig/snvs_distribution_over_enhancers/plots/density.snvs_distribution_over_enhancers.", marker,".high_cluster.hartwig_vs_icgc.png"), device = "png", width = 7, height = 5)
 }
+
 
 ##
 
@@ -142,7 +144,6 @@ for(marker in MARKERS){
       theme_light()+
       labs(
         title = paste0(clust, " ", marker), 
-        subtitle = label, 
         x = "distance from summit", y = "")
     print(d)
     
@@ -151,27 +152,8 @@ for(marker in MARKERS){
 }
 
 for(marker in (MARKERS)){
-  cowplot::plot_grid("title", plotlist = plot_list[[marker]], ncol = 1) #%>%
-    #ggsave(., filename = paste0("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/Hartwig/snvs_distribution_over_enhancers/plots/density.snvs_distribution_over_enhancers.", marker,".each_cluster.hartwig_vs_icgc.", label, ".png"), device = "png", width = 7, height = 22)
+  cowplot::plot_grid("title", plotlist = plot_list[[marker]], ncol = 1) %>%
+    ggsave(., filename = paste0("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/Hartwig/snvs_distribution_over_enhancers/plots/density.snvs_distribution_over_enhancers.", marker,".each_cluster.hartwig_vs_icgc.from_Gianluca.png"), device = "png", width = 7, height = 22)
 }
-
-#dev.off()
-
-
-##
-
-
-# Frequencies 
-
-WIN <- 50
-
-hart.ctip.dist <- hart.ctip.dist[2:dim(hart.ctip.dist)[1], ]
-
-hart.ctip.dist.win <- hart.ctip.dist %>% filter(abs(dist) <= WIN)
-sort(table(hart.ctip.dist.win$name), decreasing = T) %>% 
-  barplot(las=3, cex.names = 0.5, main="Number of SNVs x enhancer across all hartwig samples: 50 bp win")
-
-table(hart.ctip.dist.win$name)[table(hart.ctip.dist.win$name) > 4]
-table(hart.ctip.dist.win$name)[table(hart.ctip.dist.win$name) > 6]
 
 

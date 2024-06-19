@@ -30,9 +30,6 @@ OUT_FOLDER_PLOTS <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/IC
 # SSMs
 SSMs <- read_tsv("/Users/ieo6983/Desktop/fragile_enhancer_clinical/data/genomics/pre_processed_ICGC/from_gianluca.ssm.pcawg.coord.tsv")
 
-cols <- c("icgc_mutation_id", "icgc_donor_id", "project_code", "icgc_specimen_id", "icgc_sample_id", "chromosome", 
-          "start", "end", "mutation_type", "reference_genome_allele", "mutated_from_allele","mutated_to_allele")
-
 SSMs$end <- SSMs$POS
 SSMs <- SSMs %>% relocate(., end, .after = POS)
 colnames(SSMs)[c(3, 4, 5)] <- c("seqnames", "start", "end")

@@ -1,13 +1,11 @@
-
 library(tidyverse)
 library(VariantAnnotation)
 library(GenomicRanges)
 
 path_input_main <- fs::path("/hpcnfs/scratch/P_PGP_FRAGILE_ENHANCERS/data")
-path_input_main <- fs::path("/Users/ieo6983/Downloads/")
-path_enhancers_ctip <- fs::path("/Users/ieo6983/Desktop/Ciacci_et_al/data/functional_genomics/others/Cluster_CtIP_Enh_All.txt")
-path_enhancers_grhl <- fs::path("/Users/ieo6983/Desktop/Ciacci_et_al/data/functional_genomics/others/Cluster_GRHL_Enh_All.txt")
-path_results <- fs::path("/Users/ieo6983/Desktop/Ciacci_et_al/results/Hartwig/")
+path_enhancers_ctip <- fs::path("/hpcnfs/scratch/PGP/Ciacci_et_al/data/functional_genomics/others/Cluster_CtIP_Enh_All.txt")
+path_enhancers_grhl <- fs::path("/hpcnfs/scratch/PGP/Ciacci_et_al/data/functional_genomics/others/Cluster_GRHL_Enh_All.txt")
+path_results <- fs::path("/hpcnfs/scratch/P_PGP_FRAGILE_ENHANCERS/results/data/")
   
 SEED <- 4321
 set.seed(SEED)
@@ -49,13 +47,9 @@ enh_all_ext_gr <- lapply(enh_all_ext, function(df_enh_ext){
   return(df_enh_ext)
 })
 
-# TODO: implement function to pre-process enhancer files? 
-# - Add summit&name
-# - Extend regions by WIN 
-# - And convert to GRanges 
-
 
 ##
+
 
 all.enh.vcf.overlaps <- setNames(vector(mode = "list", length = 2), MARKERS)
 all.enh.vcf.overlaps <- list("CtIP" = as.data.frame(matrix(nrow = 0, ncol = 19)), 
@@ -66,10 +60,11 @@ all.enh.vcf.overlaps <- lapply(all.enh.vcf.overlaps, function(df){colnames(df) <
 
 for(dir in list.dirs(path_input_main, recursive = F)){
   dir_name <- str_split(dir, pattern = "/", simplify = T)[length(str_split(dir, pattern = "/", simplify = T))]
+  cat("\n")
   print(paste0("Iterating over sample: ", dir_name))
   
   # Read VCF file:
-  somatic.filename <- paste0(dir, "purple/", dir_name, ".purple.somatic.vcf.gz")
+  somatic.filename <- paste0(dir, "/purple/", dir_name, ".purple.somatic.vcf.gz")
   somatic.vcf <- readVcf(somatic.filename, genome = "hg19")
   
   # Keep only variants passing quality filters ("PASS")
@@ -79,7 +74,7 @@ for(dir in list.dirs(path_input_main, recursive = F)){
   print(paste0("Initial number of variants: ", length(somatic.vcf), " | Number of variants after filtering: ", length(somatic.vcf.filt)))
   
   # Keep only SNVs
-  snv_filt <- (nchar(fixed(somatic.vcf)[, "REF"]) == 1) & unlist((nchar(fixed(somatic.vcf)[, "ALT"]) == 1))
+  snv_filt <- (nchar(fixed(somatic.vcf.filt)[, "REF"]) == 1) & unlist((nchar(fixed(somatic.vcf.filt)[, "ALT"]) == 1))
   somatic.vcf.filt.snvs <- somatic.vcf.filt[snv_filt]
   print("-- Retaining only SNVs --")
   print(paste0("Initial number of variants: ", length(somatic.vcf.filt), " | Number of variants after filtering: ", length(somatic.vcf.filt.snvs)))
@@ -87,21 +82,21 @@ for(dir in list.dirs(path_input_main, recursive = F)){
   # Extract somatic mutations ranges 
   somatic.vcf.filt.snvs.gr <- somatic.vcf.filt.snvs@rowRanges
   seqlevels(somatic.vcf.filt.snvs.gr) <- paste0("chr", seqlevels(somatic.vcf.filt.snvs.gr))
-  mcols(somatic.vcf.filt.snvs.gr) <- cbind(fixed(somatic.vcf.filt.snvs), 
-                                           data.frame("SAMPLE" = rep(dir_name, length(somatic.vcf.filt.snvs.gr))))
   
-  # TODO: compute overlap among SNVs and enhancers for BOTH MARKERS 
-  # - Use findOverlaps() to find intersections  
-  # - Create df of enhancers-SNVs intersections
-  # IMPORTANT: the df should contain an ID indicating the sample of origin. 
-  
+  df_meta <- cbind(fixed(somatic.vcf.filt.snvs), 
+                   data.frame("SAMPLE" = rep(dir_name, length(somatic.vcf.filt.snvs.gr))), 
+                   data.frame("PURPLE_AF" = info(somatic.vcf.filt.snvs)[, 'PURPLE_AF']), 
+                   data.frame("AF" = geno(somatic.vcf.filt.snvs)$AF[, 2])
+                   )
+  mcols(somatic.vcf.filt.snvs.gr) <- df_meta
+
   for(marker in MARKERS){
+    print(paste0("-- Computing overlaps among SNVs and ", marker, " enhancers --"))
     enh_ext_gr <- enh_all_ext_gr[[marker]]
     
     hits <- findOverlaps(query=enh_ext_gr, subject=somatic.vcf.filt.snvs.gr)
     q <- as.data.frame(enh_ext_gr[queryHits(hits)])
     s <- cbind(as.data.frame(somatic.vcf.filt.snvs.gr[subjectHits(hits)], row.names=NULL),data.frame("ID" = names(somatic.vcf.filt.snvs.gr[subjectHits(hits)])))
-    #s <- cbind(as.data.frame(somatic.vcf.snvs.gr[subjectHits(hits)], row.names=NULL),data.frame("ID" = names(somatic.vcf.snvs.gr[subjectHits(hits)])))
     enh.vcf.overlaps <- cbind(q,s)
     
     all.enh.vcf.overlaps[[marker]] <- rbind(all.enh.vcf.overlaps[[marker]], enh.vcf.overlaps)
@@ -109,5 +104,5 @@ for(dir in list.dirs(path_input_main, recursive = F)){
 }
 
 # Save overlaps x marker 
-#all.enh.vcf.overlaps[["CtIP"]] %>% write_tsv(., fs::path(path_results, paste0("CtIP_enh.hartwig_snvs.overlap.WIN_", WIN, ".tsv")))
-#all.enh.vcf.overlaps[["GRHL"]] %>% write_tsv(., fs::path(path_results, paste0("GRHL_enh.hartwig_snvs.overlap.WIN_", WIN, ".tsv")))
+all.enh.vcf.overlaps[["CtIP"]] %>% write_tsv(., fs::path(path_results, paste0("CtIP_enh.hartwig_snvs.overlap.WIN_", WIN, ".tsv")))
+all.enh.vcf.overlaps[["GRHL"]] %>% write_tsv(., fs::path(path_results, paste0("GRHL_enh.hartwig_snvs.overlap.WIN_", WIN, ".tsv")))
