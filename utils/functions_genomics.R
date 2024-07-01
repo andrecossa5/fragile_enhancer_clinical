@@ -23,23 +23,22 @@ remove_self_overlaps <- function(input_granges){
 ### GENERATE RANDOM SEQS ###
 # Generate a set of random genomic sequences 
 
-generate_random_seqs <- function(seed, n_seqs, win){
+generate_random_seqs <- function(seed, n_seqs, win, chrom_lengths_info){
   set.seed(seed)
-  
+  library(tidyverse)
+  path_chrom_sizes <- fs::path("/Users/ieo6983/Desktop/fragile_enhancer_clinical/data/hg19.chrom.txt")
+
   # Define chromosomes info
-  chrs_info <- data.frame(
-    "chrom" = c(paste("chr", seq(1:22), sep = ""), "chrX", "chrY"), 
-    seq_lenghts = c(249250621,243199373, 198022430, 191154276, 180915260, 171115067, 159138663, 146364022, 
-                    141213431, 135534747, 135006516, 133851895, 115169878, 107349540, 102531392 , 90354753, 
-                    81195210, 78077248, 59128983 , 63025520, 48129895, 51304566, 155270560 , 59373566)
-  )
+  standard_chrom <- paste0("chr", c(seq(1:22), "X", "Y"))
+  chrs_info <- read_tsv(path_chrom_sizes, col_names = c("chrom", "seq_lengths")) %>% 
+    dplyr::filter(., chrom %in% standard_chrom) %>% suppressMessages()
   
   # Sample chromosomes and start positions 
   ran_seqs <- data.frame(chrom = sample(chrs_info$chrom, n_seqs, replace=T))
   start_pos <- c()
   for(i in 1:length(ran_seqs$chrom)){
     chrom <- ran_seqs$chrom[i]
-    chrom_length <- chrs_info[chrs_info$chrom == chrom, ]$seq_lenghts
+    chrom_length <- chrs_info[chrs_info$chrom == chrom, ]$seq_lengths
     start_pos[i] <- round(runif(1, 0, chrom_length),0)
   }
   ran_seqs$start <- start_pos

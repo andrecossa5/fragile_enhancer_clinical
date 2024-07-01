@@ -19,14 +19,14 @@ set.seed(SEED)
 source("/Users/ieo6983/Desktop/fragile_enhancer_clinical/utils/functions_genomics.R")
 
 IN_FOLDER <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/"
-OUT_FOLDER_DATA <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/"
-OUT_FOLDER_PLOTS <- "/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/plots/"
+OUT_FOLDER_DATA <- fs::path("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/data/")
+OUT_FOLDER_PLOTS <- fs::path("/Users/ieo6983/Desktop/fragile_enhancer_clinical/results/ICGC/enhancers_SSMs_overlaps/plots/")
 
 ```
 
 ```{r}
 variants_gianluca <- F
-variants_AFs <- T
+variants_AFs <- F
 
 if(variants_gianluca == T){
   # Variants dataset from Gianluca
@@ -87,7 +87,7 @@ put_enhancers$summit <- put_enhancers$end
 
 
 ### 
-WIN <- 3000
+WIN <- 1000
 UNIT <- "kb"
 MARKERS <- names(enh_all)
 
@@ -109,6 +109,7 @@ colnames(stat_enhancers_enh) <- MARKERS
 stat_donors_enh <- matrix(nrow = length(unique(input_variants$icgc_donor_id)), ncol = length(MARKERS))
 colnames(stat_donors_enh) <- MARKERS
 
+enh_SSMs_all <- list("CtIP", "GRHL")
 for(marker in MARKERS){
   mut <- "SSMs"
   
@@ -152,7 +153,7 @@ for(marker in MARKERS){
   colnames(SSMs_sbj)[1:5] <- paste(colnames(SSMs_sbj)[1:5], "sbj", sep = "_")
   ran_seqs_SSMs <- cbind(data.frame(ran_seqs_gr[queryHits(hits_obj_ran)], SSMs_sbj))
   
-  
+  enh_SSMs_all[[marker]] <- enh_SSMs
   
   ### SAVE stats - Enhancers only
   save_intermediate <- F
@@ -236,13 +237,12 @@ for(marker in MARKERS){
 ```
 
 
-
 ## SSMs overlap over High-low enhancers
 ```{r}
-enh_SSMs_ctip <- read_tsv(paste(OUT_FOLDER_DATA, "Table_enh_SSMs_CtIP.all_overlaps.tsv", sep=""))
-enh_SSMs_grhl <- read_tsv(paste(OUT_FOLDER_DATA, sprintf("Table_enh_SSMs_GRHL.all_overlaps.%s%s_WIN.tsv", WIN,UNIT), sep=""))
-enh_SSMs <- list("CtIP" = enh_SSMs_ctip, "GRHL" = enh_SSMs_grhl)
+OUT_FOLDER <- fs::path("/Users/ieo6983/Desktop/enhancers_project_old/per_ivan/")
+#enh_SSMs_all[["CtIP"]] %>% dplyr::select(., icgc_donor_id, icgc_mutation_id, seqnames_sbj, start_sbj, end_sbj, mutation_type, mutated_from_allele, mutated_to_allele, name, cluster) %>% write_tsv(fs::path(OUT_FOLDER, "Table_enh_SSMs_CtIP.all_overlaps.1kb_WIN.ICGC.ivan.tsv"))
 
+#enh_SSMs_all[["GRHL"]] %>% dplyr::select(., icgc_donor_id, icgc_mutation_id, seqnames_sbj, start_sbj, end_sbj, mutation_type, mutated_from_allele, mutated_to_allele, name, cluster) %>% write_tsv(fs::path(OUT_FOLDER, "Table_enh_SSMs_GRHL.all_overlaps.1kb_WIN.ICGC.ivan.tsv"))
 
 ```
 
