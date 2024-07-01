@@ -340,7 +340,7 @@ for(marker in MARKERS){
   print(paste0("Number of enhancers with SNVs in icgc and hart (both):", length(unique(common_enh$name))))
   perc <- round(length(unique(common_enh$name)) / tot_enh * 100, 2)
   print( paste0( perc , " %"))
-  
+    
   # Compute FC of avg_af in hartwig vs. icgc, for common enhancers 
   common_enh$avg_af.fc <- log2(common_enh$avg_af.y / common_enh$avg_af.x)
   t_test_res <- t.test(common_enh$avg_af.fc)$p.value
@@ -378,12 +378,17 @@ for(marker in MARKERS){
   # Annotated (loops) or not
   common_enh$anno <- "no"
   common_enh[common_enh$name %in% annotated_enhancers$name, ]$anno <- "yes"
+  print("Which annotated enhancers: ")
+  print(common_enh[common_enh$anno == "yes", ]$name)
   plot_pie3 <- common_enh %>% group_by(., anno) %>% summarise(., counts = n())
   pie_anno <- ggplot(plot_pie3, aes(x="", y=counts, fill=anno)) +
     geom_bar(stat="identity", width=1, color = "white") +
     coord_polar("y", start=0) +
     theme_void()
   print(pie_anno)
+  # Save df of annotated enhancers with mutations across datasets 
+  common_enh[common_enh$anno == "yes", ] %>% write_tsv(., 
+            fs::path(path_results_data, paste0("Anno_enhancers.mutated_across_hart_and_icgc.", marker, ".tsv")))
   
   # Only common enhancers wit log2FC(avg. AF) > 0 
   common_enh_sub <- common_enh %>% filter(., avg_af.fc > 0)
@@ -553,6 +558,10 @@ for(marker in MARKERS){
     labs(x = "", y = "", 
           title = paste0("Types of SBSs - ", marker))
   print(SBS_types)
+  
+  # Save variants within common enahncers for mut.sig.analysis
+  common_enh_var_df <- AF_all[AF_all$name %in% common_enh_sub_dfs[[marker]]$name,]
+  common_enh_var_df %>% write_tsv(., fs::path(path_results_data, paste0("SNVs_coords.common_enhancers_mutated_across_hart_and_icgc.", marker, ".tsv")))
   
 }
   
