@@ -1,0 +1,682 @@
+---
+title: "RNA-seq"
+output: html_document
+date: "2024-03-25"
+---
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library("DESeq2")
+library("apeglm")
+library("pheatmap")
+library("RColorBrewer")
+library("gprofiler2")
+library(fgsea)
+library(ComplexHeatmap)
+
+IN_FOLDER <- "/Users/ieo6983/Desktop/expression/"
+setwd(IN_FOLDER)
+```
+
+Referring to: https://www.bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.html#input-data
+
+- Samples info - 
+BATCH 1:
+NT=S42153
+TGF=S42154
+SCR#1=S42155
+GRHL2KD#1=S42156
+
+BATCH2: 
+SCR#2=S45028
+SCR#3=S45029
+GRHL2KD#2=S45030
+GRHL2KD#2=S45031
+
+```{r}
+# Input matrix gene_counts x sample
+g_1st <- read_tsv("./results_1st_group/star_salmon/salmon.merged.gene_counts.tsv") 
+g_2nd <- read_tsv("./results_2nd_group/star_salmon/salmon.merged.gene_counts.tsv")
+
+sum(!g_1st$gene_id == g_2nd$gene_id)
+sum(!g_1st$gene_name == g_2nd$gene_name)
+
+gene_counts <- full_join(g_1st, g_2nd, by = c("gene_id", "gene_name"))
+head(gene_counts)
+
+length(unique(gene_counts$gene_name)) == dim(gene_counts)[1]
+length(unique(gene_counts$gene_id)) == dim(gene_counts)[1]
+
+# Keep only unique gene_id 
+id_to_gene <- gene_counts[,1:2]
+gene_counts <- gene_counts %>% dplyr::select(-gene_name) %>%
+  dplyr::select(gene_id, SCR_1, SCR_2, SCR_3, GRHL2KD_1, GRHL2KD_2, GRHL2KD_3, NT_1, TGF)
+
+gene_counts_m <- as.matrix(gene_counts[,-1])
+rownames(gene_counts_m) <- gene_counts$gene_id
+head(gene_counts_m, n=2)
+
+# Matrix must contain integers
+gene_counts_m <- round(gene_counts_m, 0)
+head(gene_counts_m, n=2)
+
+```
+
+```{r}
+# Metadata: info about samples
+samples <- colnames(gene_counts_m)
+condition <- c(rep("SCR",3), rep("GRHL2KD", 3), "NT_1", "TGF")
+batch <- c(1,2,2,1,2,2,1,1)
+  
+coldata <- data.frame("condition" = condition, "batch" = batch, row.names = samples)
+coldata
+
+# IMPORTANT: the columns of the count matrix and the rows of the column data (information about samples) must be in the same order.
+all(rownames(coldata) == colnames(gene_counts_m))
+```
+
+
+
+## Create DESeq2 dataset
+```{r}
+# Create DESeq2 object 
+dds <- DESeqDataSetFromMatrix(countData = gene_counts_m,
+                              colData = coldata,
+                              design = ~ batch + condition)
+
+featureData <- id_to_gene
+mcols(dds) <- DataFrame(mcols(dds), featureData)
+mcols(dds)
+
+```
+
+## Filtering
+Here we perform pre-filtering to keep only rows that have a count of at least 10 for a minimal number of samples. The count of 10 is a reasonable choice for bulk RNA-seq. A recommendation for the minimal number of samples is to specify the smallest group size, e.g. here there are 3 treated samples. 
+```{r}
+smallestGroupSize <- 3 # putting 3 as SCR and GRHL2KD are the main samples
+keep <- rowSums(counts(dds) >= 10) >= smallestGroupSize
+dds <- dds[keep,]
+
+```
+
+
+
+
+
+### Data quality assessment by sample clustering and visualization ###
+```{r}
+#Heatmap of the sample-to-sample distances
+sampleDists <- dist(t(assay(dds)))
+sampleDistMatrix <- as.matrix(sampleDists)
+
+rownames(sampleDistMatrix) <- paste(dds$condition)
+colnames(sampleDistMatrix) <- NULL
+
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+
+```
+
+```{r}
+pca_before <- prcomp(t(counts(dds)), scale. = F)
+
+pca_df_before <- as.data.frame(pca_before$x)
+pca_df_before$group <- as.factor(coldata$condition)
+pca_df_before$batch <- as.factor(coldata$batch)
+
+ggplot(pca_df_before, aes(x = PC1, y = PC2, color = condition, shape = batch)) +
+  geom_point(size = 3)+ 
+  theme_light()
+
+```
+
+--> batch effect.
+
+
+## VST = variance stabilizing transformations
+Produce transformed data on the log2 scale which has been normalized with respect to library size or other normalization factors.
+The point of these two transformations, the VST and the rlog, is to remove the dependence of the variance on the mean, particularly the high variance of the logarithm of count data when the mean is low. Both VST and rlog use the experiment-wide trend of variance over mean, in order to transform the data to remove the experiment-wide trend.
+```{r}
+boxplot(counts(dds)[1:40,])
+```
+
+```{r}
+vsd <- vst(dds, blind=FALSE)
+rld <- rlog(dds, blind=FALSE)
+head(assay(vsd), 3)
+head(assay(rld), 3)
+
+boxplot(assay(vsd)[1:40,])
+boxplot(assay(rld)[1:40,])
+
+```
+
+## Principal component plot of the samples
+```{r}
+plotPCA(vsd, intgroup=c("condition"))+
+  theme_light()+
+  geom_point(size = 3)
+
+pcaData <- plotPCA(vsd, intgroup=c("condition"), returnData=TRUE)
+
+```
+
+_Interpreting loadings:_
+_Magnitude of Loadings_: The magnitude of a gene's loading represents the strength of its contribution to a particular principal component. Larger absolute values indicate stronger contributions.
+_Sign of Loadings_: The sign of a gene's loading indicates the direction of its contribution to the principal component. Positive loadings suggest that higher expression of the gene is associated with higher values of the principal component, while negative loadings suggest the opposite.
+```{r}
+norm_counts <- assay(vsd)
+pca_result <- prcomp(t(norm_counts), scale. = F)
+
+pca_df <- as.data.frame(pca_result$x)
+pca_df$group <- as.factor(coldata$condition)
+pca_df$batch <- as.factor(coldata$batch)
+
+ggplot(pca_df, aes(x = PC1, y = PC2, color = group, shape = batch)) +
+  geom_point(size = 3)+ 
+  theme_light()
+
+# Extract the loadings of genes on the first two principal components
+gene_loadings <- as.data.frame(pca_result$rotation[, 1])
+colnames(gene_loadings) <- "PCA_1"
+head(gene_loadings)
+
+top_pos_pc1 <- gene_loadings %>% top_n(., wt = PCA_1, n = 20) %>% mutate(., direction = "top_pos")
+top_neg_pc1 <- gene_loadings %>% top_n(., wt = -PCA_1, n = 20) %>% mutate(., direction = "top_neg")
+top_pc1 <- rbind(top_pos_pc1, top_neg_pc1)
+top_pc1 <- top_pc1 %>% rownames_to_column(., "gene_id") %>%
+  left_join(id_to_gene, by = "gene_id") %>%
+  select(gene_name, PCA_1)
+
+# heatmap 
+ggplot(top_pc1, aes(x = 1, y = reorder(gene_name, PCA_1), fill = PCA_1)) +
+  geom_tile() +
+  scale_fill_gradient(low = "blue", high = "red") +
+  theme_minimal() +
+  labs(x = NULL, y = "Gene", fill = "PC1_loading")
+
+```
+
+
+```{r}
+#Heatmap of the sample-to-sample distances
+sampleDists <- dist(t(assay(vsd)))
+sampleDistMatrix <- as.matrix(sampleDists)
+
+rownames(sampleDistMatrix) <- paste(dds$condition)
+colnames(sampleDistMatrix) <- NULL
+
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+```
+
+
+
+
+
+### DGE Analysis ###
+The variance stabilizing and rlog transformations are provided for applications other than differential testing, for example clustering of samples or other machine learning applications. For differential testing we recommend the DESeq function applied to raw counts as outlined above.
+```{r}
+# Keep only SCR and GRHL2KD contasts
+gene_counts_red <- gene_counts_m[, -c(7,8)]
+head(gene_counts_red, n=3)
+coldata_red <- coldata[!rownames(coldata) %in% c("NT_1", "TGF"), ]
+all(rownames(coldata_red) == colnames(gene_counts_red))
+
+# Create DESeq2 object 
+dds_red <- DESeqDataSetFromMatrix(countData = gene_counts_red,
+                              colData = coldata_red,
+                              design = ~ batch + condition)
+
+featureData <- id_to_gene
+mcols(dds_red) <- DataFrame(mcols(dds_red), featureData)
+mcols(dds_red)
+
+```
+
+_Note on factor levels_
+By default, R will choose a reference level for factors based on alphabetical order. Then, if you never tell the DESeq2 functions which level you want to compare against (e.g. which level represents the control group), the comparisons will be based on the alphabetical order of the levels.
+- you can explicitly set the factors levels
+
+With no additional arguments to results, the log2 fold change and Wald test p value will be for the last variable in the design formula, and if this is a factor, the comparison will be the last level of this variable over the reference level. 
+However, the order of the variables of the design do not matter so long as the user specifies the comparison to build a results table for, using the name or contrast arguments of results.
+
+```{r}
+# Main function for DGE analysis
+dds_red$condition <- factor(dds_red$condition, levels = c("SCR","GRHL2KD"))
+
+dds_red <- DESeq(dds_red)
+resultsNames(dds_red) # list coefficients
+
+# 'results' extracts a results table with log2 fold changes, p values and adjusted p values
+# The text, condition GRHL2KD vs SCR, tells you that the estimates are of the logarithmic fold change log2(GRHL2KD/SCR)
+# by default p-val threshold is 0.01, set alpha=0.05 to change it
+res <- results(dds_red, contrast=c("condition", "GRHL2KD", "SCR"))
+res
+
+data.frame(res@listData, row.names = res@rownames) %>% View()
+
+```
+
+```{r}
+resOrdered <- res[order(res$pvalue),]
+summary(res)
+
+# Add gene_names and export to csv
+df_export <- as.data.frame(resOrdered) %>% 
+  rownames_to_column(., "gene_id") %>%
+  left_join(., id_to_gene, by = "gene_id") %>%
+  relocate(., gene_name, .after = gene_id)
+
+#write.csv(df_export, file="DEGs_Condition_GRHL2KD_SCR.csv")
+
+```
+
+
+Shrinkage of effect size (LFC estimates) is useful for visualization and ranking of genes. To shrink the LFC, we pass the dds object to the function lfcShrink.
+We provide the dds object and the name or number of the coefficient we want to shrink, where the number refers to the order of the coefficient as it appears in resultsNames(dds).
+```{r}
+resultsNames(dds_red)
+resLFC <- lfcShrink(dds_red, coef="condition_GRHL2KD_vs_SCR", type="apeglm")
+resLFC
+
+```
+
+
+## Exploring and exporting results
+```{r}
+plotMA(res, ylim=c(-2,2))
+```
+
+It is more useful to visualize the MA-plot for the shrunken log2 fold changes, which remove the noise associated with log2 fold changes from low count genes without requiring arbitrary filtering thresholds.
+```{r}
+plotMA(resLFC, ylim=c(-2,2))
+```
+
+
+## Volcano plot
+```{r}
+significance_threshold <- 0.05
+logFC_threshold <- 1
+
+n_DE <- df_export %>% filter(padj <= significance_threshold & abs(log2FoldChange) >= logFC_threshold) %>% 
+  mutate(DE = ifelse(log2FoldChange >= logFC_threshold, "Up", "Down")) %>%
+  select(DE) %>% table(.)
+
+p <- ggplot(df_export, aes(x = log2FoldChange, y = -log10(padj))) +
+  geom_point(aes(color = ifelse(padj <= significance_threshold & log2FoldChange >= logFC_threshold, "red", 
+    ifelse(padj <= significance_threshold & log2FoldChange <= -logFC_threshold, "blue", "gray"))), alpha = 0.6) +
+  scale_color_identity() +
+  geom_hline(yintercept = -log10(significance_threshold), linetype = "dashed", color = "black") +
+  geom_vline(xintercept = c(-logFC_threshold, logFC_threshold), linetype = "dashed", color = "black") +
+  labs(x = "Log2 Fold Change", y = "-log10(Adjusted p-value)", title = "Volcano Plot") +
+  theme_minimal()
+
+p + annotate("text",  x = min(df_export$log2FoldChange, na.rm = T), y = max(-log10(df_export$padj), na.rm = T), 
+             label = paste("Down:", "\n", n_DE[["Down"]], sep=""), hjust = 0, vjust = 1, color = "black", size = 4) +
+  annotate("text",  x = max(df_export$log2FoldChange, na.rm = T), y = max(-log10(df_export$padj), na.rm = T), 
+             label =  paste("Up: ", "\n", n_DE[["Up"]], sep=""), hjust = 0.5, vjust = 1, color = "black", size = 4)
+
+
+
+# With shrinked FCs
+# Add gene_names and export to csv
+df_LFC <- as.data.frame(resLFC) %>% 
+  rownames_to_column(., "gene_id") %>%
+  left_join(., id_to_gene, by = "gene_id") %>%
+  relocate(., gene_name, .after = gene_id)
+
+n_DE <- df_LFC %>% filter(padj <= significance_threshold & abs(log2FoldChange) >= logFC_threshold) %>% 
+  mutate(DE = ifelse(log2FoldChange >= logFC_threshold, "Up", "Down")) %>%
+  select(DE) %>% table(.)
+
+p2 <- ggplot(df_LFC, aes(x = log2FoldChange, y = -log10(padj))) +
+  geom_point(aes(color = ifelse(padj <= significance_threshold & log2FoldChange >= logFC_threshold, "red", 
+                              ifelse(padj <= significance_threshold & log2FoldChange <= -logFC_threshold, "blue", "gray"))), alpha = 0.6) +
+  scale_color_identity() +
+  geom_hline(yintercept = -log10(significance_threshold), linetype = "dashed", color = "black") +
+  geom_vline(xintercept = c(-logFC_threshold, logFC_threshold), linetype = "dashed", color = "black") +
+  labs(x = "Log2 Fold Change", y = "-log10(Adjusted p-value)", title = "Volcano Plot - GRHL2KD_vs_SCR") +
+  theme_minimal()
+
+p2 + annotate("text",  x = min(df_LFC$log2FoldChange, na.rm = T), y = max(-log10(df_LFC$padj), na.rm = T), 
+             label = paste("Down:", "\n", n_DE[["Down"]], sep=""), hjust = 0, vjust = 1, color = "black", size = 4) +
+  annotate("text",  x = max(df_LFC$log2FoldChange, na.rm = T), y = max(-log10(df_LFC$padj), na.rm = T), 
+             label =  paste("Up: ", "\n", n_DE[["Up"]], sep=""), hjust = 0.5, vjust = 1, color = "black", size = 4)
+
+
+## Annotate some genes
+# Based on log2FC
+top_up <- df_LFC %>% filter(padj <= significance_threshold & abs(log2FoldChange) >= logFC_threshold) %>%
+  top_n(., wt = log2FoldChange, n = 10) %>% select(gene_name, log2FoldChange, padj)
+top_down <- df_LFC %>% filter(padj <= significance_threshold & abs(log2FoldChange) >= logFC_threshold) %>%
+  top_n(., wt = -log2FoldChange, n = 10) %>% select(gene_name, log2FoldChange, padj)
+top_DEGs <- rbind(top_up, top_down)
+
+p2 + geom_text(data = top_DEGs, aes(label = gene_name), hjust = -0.1, vjust = 0)
+
+# Based on padj
+top_DEGs <- df_LFC %>% filter(padj <= significance_threshold & abs(log2FoldChange) >= logFC_threshold) %>%
+  top_n(., wt = -padj, n = 15) %>% select(gene_name, log2FoldChange, padj)
+p2 + geom_text(data = top_DEGs, aes(label = gene_name), hjust = -0.1, vjust = 0)
+
+# Based on specific genes
+spec_genes <- c("GRHL2", "GRHL1", "CDH1", "CDH2", "SNAI1", "SNAI2", "ZEB1","TWIST1", 
+                    "VIM", "RBBP8", "OVOL1", "OVOL2")
+spec_genes <- spec_genes[specific_genes %in% df_LFC$gene_name]
+spec_genes <- df_LFC[df_LFC$gene_name %in% spec_genes, ]
+p2 + geom_text(data = spec_genes, aes(label = gene_name), hjust = -0.1, vjust = 0)
+#p2 + geom_point(data = spec_genes, fill = "white", color = "black", size = 2)
+
+
+
+```
+
+
+
+### Significantly DEGs ###
+```{r}
+df_export_sig <- df_export %>% filter(padj <= significance_threshold & abs(log2FoldChange) >= logFC_threshold)
+df_LFC_sig <- df_LFC %>% filter(padj <= significance_threshold & abs(log2FoldChange) >= logFC_threshold)
+
+df_export_sig$DE <- ifelse(df_export_sig$log2FoldChange > 0, "Up", "Down")
+df_LFC_sig$DE <- ifelse(df_LFC_sig$log2FoldChange > 0, "Up", "Down")
+
+# df_LFC (shrinked) is a smaller version wrt df_export
+sum(!df_LFC_sig$gene_name %in% df_export_sig$gene_name)
+
+#df_LFC_sig %>% arrange(., log2FoldChange) %>% write_tsv(., "./Df_DEGs.df_LFC_sig.padj_0.01.log2FC_1.Up_and_Down.tsv")
+
+```
+
+```{r}
+# Marta's DEGs
+marta_degs <- read.csv("./from_marta/KD_vs_SCR_DEGs.csv")
+dim(marta_degs)
+
+sum(!marta_degs$FDR <= 0.05) # Marta put a threshold on the p-value and NOT on the FDR
+sum(!abs(marta_degs$logFC) >= 0.5) # log2FC threshold = 0.5
+
+sum(!marta_degs$GeneName %in% df_export_sig$gene_name)
+sum(!marta_degs$GeneName %in% df_LFC_sig$gene_name)
+
+marta_degs$DE <- ifelse(marta_degs$logFC > 0, "Up", "Down")
+table(marta_degs$DE)
+
+#data.frame(marta_degs[marta_degs$DE == "Up", ]$GeneName) %>% write_tsv(., "./MARTA_DEGs.Up.names.tsv", col_names = F)
+#data.frame(marta_degs[marta_degs$DE == "Down", ]$GeneName) %>% write_tsv(., "./MARTA_DEGs.Down.names.tsv", col_names = F)
+```
+
+
+## Enrichment analysis 
+```{r}
+#data.frame(df_LFC_sig[df_LFC_sig$DE == "Up", ]$gene_id) %>% write_tsv(., "./DEGs.df_LFC_sig.padj_0.05.log2FC_1.UP.tsv", col_names = F)
+#data.frame(df_LFC_sig[df_LFC_sig$DE == "Up", ]$gene_name) %>% write_tsv(., "./DEGs.df_LFC_sig.padj_0.05.log2FC_1.UP.names.tsv", col_names = F)
+
+#data.frame(df_LFC_sig[df_LFC_sig$DE == "Down", ]$gene_id) %>% write_tsv(., "./DEGs.df_LFC_sig.padj_0.05.log2FC_1.DOWN.tsv", col_names = F)
+#data.frame(df_LFC_sig[df_LFC_sig$DE == "Down", ]$gene_name) %>% write_tsv(., "./DEGs.df_LFC_sig.padj_0.05.log2FC_1.DOWN.names.tsv", col_names = F)
+
+
+# Not shrinked
+#data.frame(df_export_sig[df_export_sig$DE == "Up", ]$gene_id) %>% write_tsv(., "./DEGs.df_export_sig.padj_0.05.log2FC_1.UP.tsv", col_names = F)
+#data.frame(df_export_sig[df_export_sig$DE == "Up", ]$gene_name) %>% write_tsv(., "./DEGs.df_export_sig.padj_0.05.log2FC_1.UP.names.tsv", col_names = F)
+
+#data.frame(df_export_sig[df_export_sig$DE == "Down", ]$gene_id) %>% write_tsv(., "./DEGs.df_export_sig.padj_0.05.log2FC_1.Down.tsv", col_names = F)
+#data.frame(df_export_sig[df_export_sig$DE == "Down", ]$gene_name) %>% write_tsv(., "./DEGs.df_export_sig.padj_0.05.log2FC_1.Down.names.tsv", col_names = F)
+
+```
+
+_Sources_:
+Gene Ontology (GO or by branch GO:MF, GO:BP, GO:CC)
+KEGG (KEGG)
+Reactome (REAC)
+WikiPathways (WP)
+TRANSFAC (TF)
+miRTarBase (MIRNA)
+Human Protein Atlas (HPA)
+CORUM (CORUM)
+Human phenotype ontology (HP)
+
+_Up-regulated_
+```{r}
+gostres_up <- gost(query = df_LFC_sig[df_LFC_sig$DE == "Up", ]$gene_id, 
+                organism = "hsapiens", significant = TRUE, 
+                user_threshold = 0.05, highlight = TRUE, 
+                sources = c("GO:BP", "GO:MF", "KEGG", "REAC", "WP"))
+
+res_up <- gostres_up$result %>% arrange(., p_value)
+
+for(source in names(table(res_up$source))){
+  s <- source
+  r <- res_up %>% dplyr::filter(source == s) %>%
+    top_n(., 10, -p_value) %>%
+    ggplot(., aes(reorder(term_name, -log10(p_value)), -log10(p_value)))+
+    geom_col(aes(color = log10(p_value), fill = log10(p_value)))+
+    coord_flip()+
+    ggtitle(s)+
+    theme_light()+
+    scale_color_gradient(low = "brown", high ="red")+
+    scale_fill_gradient(low = "brown", high ="red")
+  print(r)
+}
+
+```
+
+_Down-regulated_
+```{r}
+gostres_down <- gost(query = df_LFC_sig[df_LFC_sig$DE == "Down", ]$gene_id, 
+                organism = "hsapiens", significant = TRUE, 
+                user_threshold = 0.05, highlight = TRUE, 
+                sources = c("GO:BP", "GO:MF", "KEGG", "REAC", "WP"))
+
+res_down <- gostres_down$result %>% arrange(., p_value)
+
+for(source in names(table(res_down$source))){
+  s <- source
+  r <- res_down %>% dplyr::filter(source == s) %>%
+    top_n(., 10, -p_value) %>%
+    ggplot(., aes(reorder(term_name, -log10(p_value)), -log10(p_value)))+
+    geom_col(aes(color = log10(p_value), fill = log10(p_value)))+
+    coord_flip()+
+    ggtitle(s)+
+    theme_light()+
+    scale_color_gradient(low = "brown", high ="red")+
+    scale_fill_gradient(low = "brown", high ="red")
+  print(r)
+}
+
+```
+
+
+### GSEA 
+Inputs: 
+- gene_list = Ranked gene list ( numeric vector, names of vector should be gene names). I.e. ranked by log2FC or padj
+- GO_file = gmt file representing one gene set from the Human Molecular Signatures Database 
+
+```{r}
+GSEA = function(gene_list, GO_file, pval=0.05, minSize=15, maxSize=500) {
+  set.seed(4321)
+  library(dplyr)
+  library(fgsea)
+
+  if ( any( duplicated(names(gene_list)) )  ) {
+    warning("Duplicates in gene names")
+    gene_list = gene_list[!duplicated(names(gene_list))]
+  }
+  if  ( !all( order(gene_list, decreasing = TRUE) == 1:length(gene_list)) ){
+    warning("Gene list not sorted")
+    gene_list = sort(gene_list, decreasing = TRUE)
+  }
+  myGO = fgsea::gmtPathways(GO_file)
+
+  fgRes <- fgsea::fgsea(pathways = myGO,
+                           stats = gene_list,
+                           minSize= minSize, 
+                           maxSize= maxSize) %>% 
+                  dplyr::filter(pval <= pval) %>% 
+                  arrange(desc(NES))
+  message(paste("Number of signficant gene sets =", nrow(fgRes)))
+
+  message("Collapsing Pathways -----")
+  concise_pathways = collapsePathways(data.table::as.data.table(fgRes),
+                                      pathways = myGO,
+                                      stats = gene_list)
+  fgRes = fgRes[fgRes$pathway %in% concise_pathways$mainPathways, ]
+  message(paste("Number of gene sets after collapsing =", nrow(fgRes)))
+
+  fgRes$Enrichment = ifelse(fgRes$NES > 0, "Up-regulated", "Down-regulated")
+  filtRes = rbind(head(fgRes, n = 10),
+                  tail(fgRes, n = 10 ))
+
+  total_up = sum(fgRes$Enrichment == "Up-regulated")
+  total_down = sum(fgRes$Enrichment == "Down-regulated")
+  header = paste0("Top 10 (Total pathways: Up=", total_up,", Down=",    total_down, ")")
+
+  colos = setNames(c("firebrick2", "dodgerblue2"),
+                 c("Up-regulated", "Down-regulated"))
+
+g1 <- ggplot(filtRes, aes(reorder(pathway, NES), NES)) +
+  geom_point( aes(fill = Enrichment, size = size), shape=21) +
+  scale_fill_manual(values = colos ) +
+  scale_size_continuous(range = c(2,10)) +
+  geom_hline(yintercept = 0) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title=header)
+
+  output = list("Results" = fgRes, "Plot" = g1)
+  return(output)
+}
+```
+
+```{r}
+# Gene sets
+onco_sig <- "GSEA/DB/oncogenic_signature_gene_sets.c6.all.v2023.2.Hs.symbols.gmt"
+hallmark <- "GSEA/DB/hallmark_gene_sets.h.all.v2023.2.Hs.symbols.gmt"
+
+# Ranked genes
+ranked_genes_df <- df_LFC_sig %>% arrange(., -log2FoldChange) %>%
+  select(gene_name, log2FoldChange)
+ranked_genes <- ranked_genes_df$log2FoldChange
+names(ranked_genes) <- ranked_genes_df$gene_name
+
+```
+
+```{r}
+GSEA(gene_list = ranked_genes, GO_file = onco_sig, pval = 0.05)
+```
+```{r}
+p <- GSEA(ranked_genes, hallmark, pval = 0.05)
+print(p$Plot)
+
+#ggsave(plot = p$Plot, filename = "./GSEA/Plots/GSEA.DB_h.all.v2023.2.Hs.top_10.png", device = "png", 
+        width = 10, height = 6)
+```
+
+```{r}
+hallmark_set = fgsea::gmtPathways(hallmark)
+hallmark_emt <- hallmark_set$HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION
+length(hallmark_emt)
+
+norm_counts_df <- as.data.frame(norm_counts) %>%
+  rownames_to_column(., "gene_id") %>% 
+  left_join(., id_to_gene, by = "gene_id") %>%
+  relocate(., gene_name, .after = gene_id) %>%
+  select(-c(NT_1, TGF))
+
+my_colors <- colorRampPalette(c("blue", "white", "red"))(5)
+
+# All GSEA EMT genes
+# Most of them are euqally expressed across samples
+mat <- as.matrix(norm_counts_df[norm_counts_df$gene_name %in% hallmark_emt, -c(1:2)])
+rownames(mat) <- norm_counts_df[norm_counts_df$gene_name %in% hallmark_emt, ]$gene_name
+
+z_scores <- t(scale(t(mat)))
+Heatmap(z_scores, name = "mat", column_title = "ALL EMT genes expression across samples", cluster_rows = T, cluster_columns = T)
+
+
+# Only DE genes
+EMT_DE <- hallmark_emt[toupper(hallmark_emt) %in% toupper(df_LFC_sig$gene_name)]
+mat <- as.matrix(norm_counts_df[norm_counts_df$gene_name %in% EMT_DE, -c(1:2)])
+rownames(mat) <- norm_counts_df[norm_counts_df$gene_name %in% EMT_DE, ]$gene_name
+
+z_scores <- t(scale(t(mat)))
+h1 <- Heatmap(z_scores, name = "z-score", column_title = "DE EMT genes expression across samples", 
+        cluster_rows = T, cluster_columns = T, col = my_colors)
+print(h1)
+
+row_order1 <- row_order(h1)
+
+```
+
+```{r}
+hallmark_set = fgsea::gmtPathways(hallmark)
+hallmark_emt <- hallmark_set$HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION
+length(hallmark_emt)
+
+norm_counts_df <- as.data.frame(norm_counts) %>%
+  rownames_to_column(., "gene_id") %>% 
+  left_join(., id_to_gene, by = "gene_id") %>%
+  relocate(., gene_name, .after = gene_id)
+
+
+# Only DE genes
+EMT_DE <- hallmark_emt[toupper(hallmark_emt) %in% toupper(df_LFC_sig$gene_name)]
+mat <- as.matrix(norm_counts_df[norm_counts_df$gene_name %in% EMT_DE, -c(1:2)])
+rownames(mat) <- norm_counts_df[norm_counts_df$gene_name %in% EMT_DE, ]$gene_name
+
+z_scores <- t(scale(t(mat)))
+
+my_colors <- colorRampPalette(c("blue", "white", "red"))(15)
+h2 <- Heatmap(z_scores, name = "z-score", column_title = "DE EMT genes expression across samples", 
+        cluster_rows = T, cluster_columns = T)
+print(h2)
+
+h3 <- Heatmap(z_scores, name = "z-score", column_title = "DE EMT genes expression across samples", 
+        cluster_rows = F, cluster_columns = T, row_order = row_order1, col = my_colors)
+print(h3)
+```
+
+
+
+TODO:
+- Rifare partendo da quant.sf file 
+
+- GO Analysis miei geni + Marta 
+(+ guardare se ci sono i geni di Lorenzo - mettere nel vulcano)
+- GSEA analysis 
+(+ heatmap espressione GRHL2KD vs. SCR, con anche NT e TGF)
+
+-------------------------------------------------
+Technical:
+- relax padj thereshold? / relax log2FC threshold / Non usare shrinked version
+- provare a far andare pipeline partendo da quant.sf file (output di Salmon?)
+
+- Highlight some genes in the vulcano: CDH1 (cadherin, should be Down) + wait for Lorenzo
+  (Da capire QUALI, se in base a padj, o log2FC, o specifici)
+GRHL2
+GRHL1
+CDH1
+CDH2
+SNAI1
+SNAI2
+ZEB1
+TWIST1
+VIM
+RBBP8
+OVOL1
+OVOL2
+
+
+New:
+- ctbp (co-localizza con CtIP)
+
+
+
